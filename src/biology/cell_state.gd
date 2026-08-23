@@ -76,19 +76,13 @@ func apply_uptake(uptake: Dictionary) -> void:
 		var amount: float = maxf(0.0, float(uptake.get(world_field, 0.0)))
 		MetabolicSolverScript.add_pool(metabolites, String(mapping[world_field]), amount)
 
-func step_intracellular(dt: float, config, reactions: Array, rng) -> void:
+func step_intracellular(dt: float, config, reactions: Array, rng = null) -> void:
 	if not alive:
 		return
 	assert(genome != null and expression_state != null)
 	assert(not metabolites.is_empty())
-
-	# Expression is evaluated before catalysis. It consumes ATP/precursors and
-	# updates the proteome; the resulting protein abundance then determines all
-	# catalytic capacity for this tick.
 	last_expression_stats = ExpressionSolverScript.step(expression_state, genome, metabolites, dt, rng, config)
-	last_fluxes = MetabolicSolverScript.step(
-		metabolites, genome, reactions, dt, volume, config, expression_state.proteins
-	)
+	last_fluxes = MetabolicSolverScript.step(metabolites, genome, reactions, dt, volume, config, expression_state.proteins)
 	_sync_volume_from_biomass(config)
 	_pay_maintenance(dt, config)
 	_update_damage_and_repair(dt, config)
@@ -142,7 +136,6 @@ func create_daughters(first_id: int, second_id: int, tick: int, rng, world, conf
 	if first_offset == Vector2.ZERO:
 		first_offset = Vector2(offset_scale, 0.0)
 	var second_offset: Vector2 = -first_offset
-
 	var pool_partitions: Array = MetabolicSolverScript.partition(metabolites, ratio)
 	var expression_partitions: Array = ExpressionSolverScript.partition(expression_state, ratio, rng, config)
 	var first = CellState.new(first_id, id, generation + 1, tick, world.clamp_position(position + first_offset), volume * ratio)
@@ -164,10 +157,7 @@ func create_daughters(first_id: int, second_id: int, tick: int, rng, world, conf
 	return [first, second]
 
 func releasable_pools() -> Dictionary:
-	return {
-		"glucose": maxf(0.0, pool("G")), "oxygen": maxf(0.0, pool("O2")),
-		"nitrogen": maxf(0.0, pool("NH4")), "phosphorus": maxf(0.0, pool("P"))
-	}
+	return {"glucose": maxf(0.0, pool("G")), "oxygen": maxf(0.0, pool("O2")), "nitrogen": maxf(0.0, pool("NH4")), "phosphorus": maxf(0.0, pool("P"))}
 
 func total_adenylate() -> float:
 	return pool("ATP") + pool("ADP")
@@ -184,12 +174,7 @@ func _assert_state(config) -> void:
 	expression_state.assert_nonnegative()
 
 func checksum() -> float:
-	var result: float = (
-		float(id) * 0.001 + position.x * 3.0 + position.y * 5.0 + volume * 7.0
-		+ damage * 29.0 + energy_debt * 31.0 + MetabolicSolverScript.checksum(metabolites) * 0.001
-	)
-	if genome != null:
-		result += float(genome.checksum()) * 0.013
-	if expression_state != null:
-		result += float(expression_state.checksum()) * 0.00031
+	var result: float = float(id) * 0.001 + position.x * 3.0 + position.y * 5.0 + volume * 7.0 + damage * 29.0 + energy_debt * 31.0 + MetabolicSolverScript.checksum(metabolites) * 0.001
+	if genome != null: result += float(genome.checksum()) * 0.013
+	if expression_state != null: result += float(expression_state.checksum()) * 0.00031
 	return result
