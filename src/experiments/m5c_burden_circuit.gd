@@ -97,20 +97,28 @@ static func run_lineage(
 static func paired_differential(seed: int) -> Dictionary:
 	var stable_c: Dictionary = run_lineage(seed, "constitutive", CONDITION_HIGH_STABLE)
 	var stable_r: Dictionary = run_lineage(seed, "responsive", CONDITION_HIGH_STABLE)
+	var stable_both_divided: bool = bool(stable_c["reached_division"]) and bool(stable_r["reached_division"])
 	var stable_adv: float = float(stable_r["growth_rate"]) - float(stable_c["growth_rate"])
 	var reference_rate: float = maxf(1e-12, 0.5 * (float(stable_r["growth_rate"]) + float(stable_c["growth_rate"])))
 	var offsets: Array = [0, BaseGxe.PHASE_TICKS / 2, BaseGxe.PHASE_TICKS, (3 * BaseGxe.PHASE_TICKS) / 2]
 	var advantages: Array = []
-	var all_divided: bool = bool(stable_c["reached_division"]) and bool(stable_r["reached_division"])
+	var all_divided: bool = stable_both_divided
+	var fluctuating_divisions: int = 0
 	for offset_variant in offsets:
 		var offset: int = int(offset_variant)
 		var fc: Dictionary = run_lineage(seed, "constitutive", CONDITION_HIGH_ANOXIC, offset)
 		var fr: Dictionary = run_lineage(seed, "responsive", CONDITION_HIGH_ANOXIC, offset)
+		if bool(fc["reached_division"]):
+			fluctuating_divisions += 1
+		if bool(fr["reached_division"]):
+			fluctuating_divisions += 1
 		all_divided = all_divided and bool(fc["reached_division"]) and bool(fr["reached_division"])
 		advantages.append(float(fr["growth_rate"]) - float(fc["growth_rate"]))
 	var fluct_adv: float = _mean(advantages)
 	return {
 		"seed": seed,
+		"stable_both_divided": stable_both_divided,
+		"fluctuating_divisions": fluctuating_divisions,
 		"all_divided": all_divided,
 		"stable_advantage": stable_adv,
 		"fluctuating_advantage": fluct_adv,
