@@ -39,6 +39,9 @@ jobs:
       - name: Validate M10 exact performance equivalence
         run: godot --headless --path . --script tests/m10_performance_equivalence.gd
 
+      - name: Validate M10 biomass-scaled molecular machinery
+        run: godot --headless --path . --script tests/m10_cell_scale_tests.gd
+
       - name: Profile default visual-run longitudinal dynamics
         run: godot --headless --path . --script tests/m10_baseline_trace.gd
 
