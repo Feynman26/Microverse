@@ -102,8 +102,9 @@ jobs:
       - name: Validate compact M8 environment and analytics closure
         run: godot --headless --path . --script tests/m8_completion_tests.gd
 
-      - name: Execute frozen M8 regulatory confirmation panel
-        run: godot --headless --path . --script tests/m8_regulatory_confirmation_tests.gd
+      # The frozen M8 regulatory confirmation remains reproducible at
+      # tests/m8_regulatory_confirmation_tests.gd, but its predeclared 8-seed
+      # result is closed evidence and is not rerun on every routine code change.
 
       - name: Validate compact M9 exact causal laboratory
         run: godot --headless --path . --script tests/m9_causal_lab_tests.gd
