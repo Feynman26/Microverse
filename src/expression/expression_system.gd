@@ -9,10 +9,18 @@ const MetaboliteCatalogScript = preload("res://src/chemistry/metabolite_catalog.
 # M5-B only changes how transcription propensity is calculated. Regulation is
 # derived from physical protein cohorts + inherited promoter motifs + ordinary
 # intracellular ligand concentrations; there are no named response APIs.
+#
+# M10 makes molecular machinery extensive with cell biomass. Transcriptional
+# throughput, translation capacity and equilibrium molecular inventories scale
+# with cell volume, while regulatory/allosteric sensing reads concentrations.
+# This prevents a growing cell from becoming artificially enzyme-dilute merely
+# because the former M5 implementation assigned a fixed per-cell capacity.
 
-static func create_equilibrium_state(genome, config) -> Dictionary:
+static func create_equilibrium_state(genome, config, cell_volume: float = 1.0) -> Dictionary:
+	assert(cell_volume > 0.0)
 	var state: Dictionary = {}
-	var tx_max: float = float(config.transcription_max_events_per_min)
+	var scale: float = _volume_scale(cell_volume, config)
+	var tx_max: float = float(config.transcription_max_events_per_min) * scale
 	var mrna_decay: float = float(config.mrna_decay_rate_per_min)
 	var translation: float = float(config.translation_events_per_mrna_per_min)
 	var protein_decay: float = float(config.protein_decay_rate_per_min)
@@ -24,12 +32,14 @@ static func create_equilibrium_state(genome, config) -> Dictionary:
 		state[int(gene.locus_id)] = {"mrna": {signature: mrna}, "protein": {signature: protein}}
 	return state
 
-static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, config) -> Dictionary:
+static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, config, cell_volume: float = 1.0) -> Dictionary:
 	assert(dt >= 0.0)
+	assert(cell_volume > 0.0)
 	if dt <= 0.0:
 		return _empty_summary()
 	_validate_state(state, genome)
 
+	var volume_scale: float = _volume_scale(cell_volume, config)
 	var snapshot: Dictionary = state.duplicate(true)
 	var pool_snapshot: Dictionary = pools.duplicate(true)
 	var tx_proposals: Dictionary = {}
@@ -49,10 +59,11 @@ static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, c
 		var mrna_cohorts: Dictionary = prior["mrna"]
 		var protein_cohorts: Dictionary = prior["protein"]
 
-		var regulation_factor: float = _regulation_factor(gene, snapshot, pool_snapshot, config)
+		var regulation_factor: float = _regulation_factor(gene, snapshot, pool_snapshot, config, cell_volume)
 		regulation_factors[locus_id] = regulation_factor
 		var tx_lambda: float = (
 			float(config.transcription_max_events_per_min)
+			* volume_scale
 			* float(gene.promoter_strength())
 			* regulation_factor
 			* dt
@@ -91,9 +102,12 @@ static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, c
 	# Ribosomes are a shared physical resource. Translation proposals are made
 	# from the common pre-step snapshot and then scaled proportionally, so gene
 	# iteration order cannot grant a locus preferential access to translation.
+	# The capacity is extensive with cell biomass: twice the cell volume can
+	# physically host twice the reference translational machinery.
 	var proteome_capacity: float = (
 		float(config.proteome_capacity_reference_units)
 		* float(config.expression_reference_protein_count)
+		* volume_scale
 	)
 	var translation_capacity: float = (
 		proteome_capacity
@@ -177,11 +191,17 @@ static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, c
 
 # Generic promoter regulation. Historical protein cohorts retain their original
 # sequence and therefore their own regulatory/allosteric identity after mutation.
-static func _regulation_factor(target_gene, state_snapshot: Dictionary, pools: Dictionary, config) -> float:
+# Protein abundance is interpreted as a concentration relative to cell volume,
+# so growth does not itself create stronger regulatory occupancy.
+static func _regulation_factor(target_gene, state_snapshot: Dictionary, pools: Dictionary, config, cell_volume: float = 1.0) -> float:
 	if not bool(config.regulation_enabled):
 		return 1.0
 	var activator: float = 0.0
 	var repressor: float = 0.0
+	var reference_protein: float = maxf(
+		1e-12,
+		float(config.expression_reference_protein_count) * _volume_scale(cell_volume, config)
+	)
 	var loci: Array = state_snapshot.keys()
 	loci.sort()
 	for locus_variant in loci:
@@ -194,9 +214,9 @@ static func _regulation_factor(target_gene, state_snapshot: Dictionary, pools: D
 			var distance: int = _hamming_distance(signature, int(target_gene.regulatory_signature))
 			if distance > int(config.regulatory_max_distance):
 				continue
-			var abundance: float = maxf(0.0, float(cohorts[signature_variant])) / float(config.expression_reference_protein_count)
+			var abundance: float = maxf(0.0, float(cohorts[signature_variant])) / reference_protein
 			var affinity: float = exp(-float(config.regulatory_distance_decay) * float(distance))
-			var occupancy: float = abundance * affinity * _allosteric_factor(signature, pools, config)
+			var occupancy: float = abundance * affinity * _allosteric_factor(signature, pools, config, cell_volume)
 			if (signature & 0x8000) == 0:
 				activator += occupancy
 			else:
@@ -211,13 +231,16 @@ static func _regulation_factor(target_gene, state_snapshot: Dictionary, pools: D
 
 # Any metabolite can modulate any compatible protein; molecule names never
 # determine biological interpretation. The strongest compatible ligand is used
-# in M5-B to keep allostery bounded and inspectable.
-static func _allosteric_factor(protein_signature: int, pools: Dictionary, config) -> float:
+# in M5-B to keep allostery bounded and inspectable. M10 uses concentration
+# rather than absolute pool size so a larger cell with the same chemistry does
+# not appear to sense a stronger ligand merely because it contains more volume.
+static func _allosteric_factor(protein_signature: int, pools: Dictionary, config, cell_volume: float = 1.0) -> float:
 	if not bool(config.allostery_enabled):
 		return 1.0
 	var strongest: float = 0.0
+	var volume: float = maxf(1e-12, cell_volume)
 	for metabolite_id in MetaboliteCatalogScript.ids():
-		var amount: float = maxf(0.0, float(pools.get(metabolite_id, 0.0)))
+		var amount: float = maxf(0.0, float(pools.get(metabolite_id, 0.0))) / volume
 		if amount <= 0.0:
 			continue
 		var distance: int = _hamming_distance(protein_signature, MetaboliteCatalogScript.ligand_signature(metabolite_id))
@@ -235,6 +258,9 @@ static func _allosteric_factor(protein_signature: int, pools: Dictionary, config
 		float(config.allosteric_min_factor),
 		float(config.allosteric_max_factor)
 	)
+
+static func _volume_scale(cell_volume: float, config) -> float:
+	return maxf(1e-12, cell_volume / maxf(1e-12, float(config.ancestor_volume)))
 
 static func _hamming_distance(first_signature: int, second_signature: int) -> int:
 	var value: int = (first_signature ^ second_signature) & 0xFFFF
