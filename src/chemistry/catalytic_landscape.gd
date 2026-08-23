@@ -7,6 +7,12 @@ const SIGNATURE_BITS: int = 16
 const ACTIVE_MAX_DISTANCE: int = 4
 const DISTANCE_DECAY: float = 0.70
 
+# Sequence affinity is a pure function of two immutable 16-bit signatures.
+# Cache only that molecular lookup, never abundance or cellular state. This
+# removes repeated XOR/popcount/exp work while returning the exact first-call
+# value on every later recognition event.
+static var _affinity_cache: Dictionary = {}
+
 static func hamming_distance(first_signature: int, second_signature: int) -> int:
 	var value: int = (first_signature ^ second_signature) & 0xFFFF
 	var distance: int = 0
@@ -16,10 +22,15 @@ static func hamming_distance(first_signature: int, second_signature: int) -> int
 	return distance
 
 static func affinity(protein_signature: int, reaction_signature: int) -> float:
-	var distance: int = hamming_distance(protein_signature, reaction_signature)
-	if distance > ACTIVE_MAX_DISTANCE:
-		return 0.0
-	return exp(-DISTANCE_DECAY * float(distance))
+	var protein: int = protein_signature & 0xFFFF
+	var reaction: int = reaction_signature & 0xFFFF
+	var key: int = (protein << 16) | reaction
+	if _affinity_cache.has(key):
+		return float(_affinity_cache[key])
+	var distance: int = hamming_distance(protein, reaction)
+	var result: float = 0.0 if distance > ACTIVE_MAX_DISTANCE else exp(-DISTANCE_DECAY * float(distance))
+	_affinity_cache[key] = result
+	return result
 
 static func is_active(protein_signature: int, reaction_signature: int) -> bool:
 	return hamming_distance(protein_signature, reaction_signature) <= ACTIVE_MAX_DISTANCE
