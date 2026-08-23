@@ -6,6 +6,7 @@ const GenomeScript = preload("res://src/genetics/genome.gd")
 const DeterministicRngScript = preload("res://src/core/deterministic_rng.gd")
 const MutationEngineScript = preload("res://src/genetics/mutation_engine.gd")
 const MutationDynamicsAnalyticsScript = preload("res://src/experiments/mutation_dynamics_analytics.gd")
+const ExperimentAnalyticsScript = preload("res://src/experiments/experiment_analytics.gd")
 
 var failures: int = 0
 var tests_run: int = 0
@@ -18,6 +19,7 @@ func _run() -> void:
 	_test_event_ledger_reconstructs_realized_mutations_per_birth()
 	_test_ancestral_departure_proxy_is_structural_not_fitness()
 	_test_environment_shift_association_tracks_mutator_abundance_descriptively()
+	_test_runner_detectors_use_m10_mechanistic_metrics()
 	if failures == 0:
 		print("PASS: %d M10 mutation-analytics tests" % tests_run)
 		quit(0)
@@ -106,6 +108,40 @@ func _test_environment_shift_association_tracks_mutator_abundance_descriptively(
 	_assert_close(float(association["above_baseline_error_abundance_after"]), 0.9, 1e-12, "post-shift higher-error lineage expansion is measured")
 	_assert_true(String(association["interpretation"]).contains("descriptive"), "environment-shift metric explicitly avoids causal overclaim")
 	_assert_true(String(association["interpretation"]).contains("paired fork"), "analytics direct causal claims to M9 counterfactual machinery")
+
+func _test_runner_detectors_use_m10_mechanistic_metrics() -> void:
+	var trajectory: Array = [
+		{
+			"population": 2, "genotype_count": 1, "mutation_events": 0, "resources": {},
+			"mutation_dynamics": {
+				"point_error_rate_per_gene": {"count": 2, "mean": 0.001},
+				"gene_count": {"count": 2, "mean": 12.0},
+				"replication_units": {"count": 2, "mean": 15.0}
+			}
+		},
+		{
+			"population": 3, "genotype_count": 2, "mutation_events": 1, "resources": {},
+			"mutation_dynamics": {
+				"point_error_rate_per_gene": {"count": 3, "mean": 0.0015},
+				"gene_count": {"count": 3, "mean": 13.0},
+				"replication_units": {"count": 3, "mean": 16.25}
+			}
+		}
+	]
+	var run: Dictionary = {
+		"termination_reason": "horizon",
+		"environment": {"mode": "constant"},
+		"trajectory": trajectory
+	}
+	var before: Dictionary = run.duplicate(true)
+	var detected: Dictionary = ExperimentAnalyticsScript.detect_candidates(run)
+	_assert_true(run == before, "M10-integrated experiment detectors remain observational")
+	_assert_true(bool(detected["genome_expansion_or_reduction"]["evidence_available"]), "genome-size detector now has sampled M10 evidence")
+	_assert_true(bool(detected["genome_expansion_or_reduction"]["candidate"]), "12-to-13 mean gene expansion is detected")
+	_assert_close(float(detected["genome_expansion_or_reduction"]["gene_count_change"]), 1.0, 1e-12, "genome detector reports quantitative mean gene-count change")
+	_assert_true(bool(detected["mutation_rate_shift"]["evidence_available"]), "mutation-rate detector now uses mechanistic replication-derived evidence")
+	_assert_true(bool(detected["mutation_rate_shift"]["candidate"]), "change in expected copy-error propensity is detected")
+	_assert_close(float(detected["mutation_rate_shift"]["change"]), 0.0005, 1e-12, "mutation-rate detector reports expected-rate change")
 
 func _assert_true(condition: bool, message: String) -> void:
 	tests_run += 1
