@@ -4,15 +4,6 @@ class_name MetabolicSolver
 const CatalyticLandscapeScript = preload("res://src/chemistry/catalytic_landscape.gd")
 const MetaboliteCatalogScript = preload("res://src/chemistry/metabolite_catalog.gd")
 
-# The solver is intentionally stateless. Authoritative chemical state lives in
-# each CellState.metabolites dictionary. Every substep has three phases:
-#
-#   1. compute potential flux for every reaction from one immutable pool snapshot;
-#   2. compute one availability scale per shared substrate from total demand;
-#   3. apply all effective reaction deltas simultaneously.
-#
-# This prevents reaction-array ordering from becoming a hidden selective force.
-
 static func create_initial_pools(volume: float, config) -> Dictionary:
 	var pools: Dictionary = {}
 	for metabolite_id in MetaboliteCatalogScript.ids():
@@ -24,7 +15,10 @@ static func create_initial_pools(volume: float, config) -> Dictionary:
 	pools["NADH"] = float(config.initial_nadh_per_volume) * volume
 	return pools
 
-static func step(pools: Dictionary, genome, reactions: Array, dt: float, volume: float, config) -> Dictionary:
+# protein_abundance is authoritative for M5 living cells. The empty-dictionary
+# fallback preserves M4 landscape/integration controls but must not be used by
+# CellState once expression has been initialized.
+static func step(pools: Dictionary, genome, reactions: Array, dt: float, volume: float, config, protein_abundance: Dictionary = {}) -> Dictionary:
 	assert(genome != null)
 	assert(dt >= 0.0)
 	assert(volume > 0.0)
@@ -37,19 +31,23 @@ static func step(pools: Dictionary, genome, reactions: Array, dt: float, volume:
 	var substeps: int = maxi(1, int(config.metabolic_substeps_per_tick))
 	var sub_dt: float = dt / float(substeps)
 	for _substep in range(substeps):
-		var fluxes: Dictionary = _solve_substep(pools, genome, reactions, sub_dt, volume, config)
+		var fluxes: Dictionary = _solve_substep(pools, genome, reactions, sub_dt, volume, config, protein_abundance)
 		for reaction_id in fluxes.keys():
 			cumulative_fluxes[reaction_id] = float(cumulative_fluxes[reaction_id]) + float(fluxes[reaction_id])
 		assert_nonnegative(pools)
 	return cumulative_fluxes
 
-static func _solve_substep(pools: Dictionary, genome, reactions: Array, dt: float, volume: float, config) -> Dictionary:
+static func _solve_substep(pools: Dictionary, genome, reactions: Array, dt: float, volume: float, config, protein_abundance: Dictionary) -> Dictionary:
 	var snapshot: Dictionary = pools.duplicate(true)
 	var potential_flux: Dictionary = {}
 	var substrate_demand: Dictionary = {}
 
 	for reaction in reactions:
-		var activity: float = CatalyticLandscapeScript.genome_activity(genome, reaction)
+		var activity: float = (
+			CatalyticLandscapeScript.genome_activity(genome, reaction)
+			if protein_abundance.is_empty()
+			else CatalyticLandscapeScript.proteome_activity(genome, protein_abundance, reaction)
+		)
 		var saturation: float = _limiting_saturation(snapshot, reaction.substrates, volume, float(config.metabolic_km_per_volume))
 		var capacity: float = activity * float(config.metabolic_rate_scale) * volume * dt
 		var requested_flux: float = maxf(0.0, capacity * saturation)
