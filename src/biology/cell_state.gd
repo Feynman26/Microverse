@@ -2,6 +2,7 @@ extends RefCounted
 class_name CellState
 
 const MetabolicSolverScript = preload("res://src/chemistry/metabolic_solver.gd")
+const MetaboliteCatalogScript = preload("res://src/chemistry/metabolite_catalog.gd")
 const ExpressionSystemScript = preload("res://src/expression/expression_system.gd")
 
 var id: int
@@ -228,13 +229,25 @@ func create_daughters(first_id: int, second_id: int, tick: int, rng, world, conf
 	death_reason = "division"
 	return [first, second]
 
+# Lysis exposes every metabolite that has a physical extracellular field. BIO
+# is not discarded: it is hydrolyzed into the exact precursor stoichiometry of
+# the reverse structural-biomass reaction (2 AA + 1 LIP + 2 NUC per BIO), which
+# preserves the digital C/N/P bookkeeping exactly without creating a dedicated
+# "corpse nutrient" resource or ecological behavior flag.
 func releasable_pools() -> Dictionary:
-	return {
-		"glucose": maxf(0.0, pool("G")),
-		"oxygen": maxf(0.0, pool("O2")),
-		"nitrogen": maxf(0.0, pool("NH4")),
-		"phosphorus": maxf(0.0, pool("P"))
-	}
+	var result: Dictionary = {}
+	for metabolite_id in MetaboliteCatalogScript.extracellular_ids():
+		var field_name: String = MetaboliteCatalogScript.extracellular_field(metabolite_id)
+		result[field_name] = maxf(0.0, pool(metabolite_id))
+
+	var structural_biomass: float = maxf(0.0, pool("BIO"))
+	var aa_field: String = MetaboliteCatalogScript.extracellular_field("AA")
+	var lip_field: String = MetaboliteCatalogScript.extracellular_field("LIP")
+	var nuc_field: String = MetaboliteCatalogScript.extracellular_field("NUC")
+	result[aa_field] = float(result.get(aa_field, 0.0)) + 2.0 * structural_biomass
+	result[lip_field] = float(result.get(lip_field, 0.0)) + structural_biomass
+	result[nuc_field] = float(result.get(nuc_field, 0.0)) + 2.0 * structural_biomass
+	return result
 
 func total_adenylate() -> float:
 	return pool("ATP") + pool("ADP")
