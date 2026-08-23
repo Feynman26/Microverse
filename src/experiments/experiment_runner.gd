@@ -4,6 +4,7 @@ class_name ExperimentRunner
 const SimConfigScript = preload("res://src/core/sim_config.gd")
 const SimulationEngineScript = preload("res://src/simulation/simulation_engine.gd")
 const EnvironmentScheduleScript = preload("res://src/experiments/environment_schedule.gd")
+const MutationDynamicsAnalyticsScript = preload("res://src/experiments/mutation_dynamics_analytics.gd")
 
 const SCHEMA_VERSION: int = 2
 const MODEL_VERSION: String = "microverse-m8b"
@@ -96,9 +97,11 @@ static func run(spec: Dictionary) -> Dictionary:
 		"final_generation_distribution": _generation_distribution(sim),
 		"division_events": _event_count(sim, "division"),
 		"mutation_events": sim.mutation_event_count(),
+		"mutation_event_summary": MutationDynamicsAnalyticsScript.summarize_event_log(sim.event_log),
 		"death_causes": _death_causes(sim),
 		"final_resources": _field_totals(sim),
 		"final_cell_diagnostics": _cell_diagnostics(sim),
+		"final_mutation_dynamics": MutationDynamicsAnalyticsScript.sample_population(sim),
 		"final_checksum": sim.checksum()
 	}
 
@@ -120,10 +123,9 @@ static func run_batch(spec: Dictionary, seeds: Array) -> Dictionary:
 		"by_seed": by_seed
 	}
 
-# Until M9 introduces a durable snapshot format, paired forks use deterministic
-# prefix replay: every arm has the same seed, initial state, prefix schedule and
-# interventions through fork_tick. The returned prefix checksums prove that both
-# arms reach an identical authoritative state before the environmental fork.
+# Paired forks use deterministic prefix replay. Every arm has the same seed,
+# initial state, prefix schedule and interventions through fork_tick; prefix
+# checksums prove identical authoritative state before environmental divergence.
 static func run_paired_fork(
 	base_spec: Dictionary,
 	fork_tick: int,
@@ -222,6 +224,7 @@ static func _sample(sim) -> Dictionary:
 		"death_causes": _death_causes(sim),
 		"resources": _field_totals(sim),
 		"cell_diagnostics": _cell_diagnostics(sim),
+		"mutation_dynamics": MutationDynamicsAnalyticsScript.sample_population(sim),
 		"checksum": sim.checksum()
 	}
 
