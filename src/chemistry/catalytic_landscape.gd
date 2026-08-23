@@ -22,9 +22,8 @@ static func affinity(protein_signature: int, reaction_signature: int) -> float:
 static func is_active(protein_signature: int, reaction_signature: int) -> bool:
 	return hamming_distance(protein_signature, reaction_signature) <= ACTIVE_MAX_DISTANCE
 
-# M4 uses promoter code only as a constitutive abundance proxy while the
-# expression system is still absent. M5 replaces this with explicit mRNA and
-# protein dynamics; the affinity landscape itself remains reusable.
+# Retained only for landscape characterization and migration controls. Living
+# M5 cells use proteome_activity(), never promoter code as protein abundance.
 static func gene_activity(gene, reaction) -> float:
 	return float(gene.promoter_strength()) * affinity(int(gene.protein_signature), int(reaction.signature)) * float(reaction.catalytic_ceiling)
 
@@ -32,6 +31,13 @@ static func genome_activity(genome, reaction) -> float:
 	var result: float = 0.0
 	for gene in genome.genes:
 		result += gene_activity(gene, reaction)
+	return result
+
+static func proteome_activity(genome, protein_abundance: Dictionary, reaction) -> float:
+	var result: float = 0.0
+	for gene in genome.genes:
+		var abundance: float = maxf(0.0, float(protein_abundance.get(int(gene.locus_id), 0.0)))
+		result += abundance * affinity(int(gene.protein_signature), int(reaction.signature)) * float(reaction.catalytic_ceiling)
 	return result
 
 static func strongest_gene_activity(genome, reaction) -> Dictionary:
