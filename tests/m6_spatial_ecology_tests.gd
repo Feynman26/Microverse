@@ -105,7 +105,7 @@ func _build_patch_sim(position: Vector2):
 		var field = sim.world.get_field(field_name)
 		for y in range(2, 7):
 			for x in range(2, 7):
-				field.set_value(x, y, 20.0)
+				field.set_value(x, y, 100.0)
 	sim.seed_ancestor(position)
 	return sim
 
