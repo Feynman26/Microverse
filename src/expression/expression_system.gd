@@ -4,14 +4,11 @@ class_name ExpressionSystem
 const MetabolicSolverScript = preload("res://src/chemistry/metabolic_solver.gd")
 const MetaboliteCatalogScript = preload("res://src/chemistry/metabolite_catalog.gd")
 
-# M5-A expression state is keyed by stable locus ID, but each locus stores
-# transcript/protein cohorts keyed by the 16-bit coding signature that produced
-# them. This matters after mutation: inherited old proteins do not magically
-# acquire the daughter's new DNA sequence. New transcription uses the current
-# gene signature while older molecular cohorts decay naturally.
-#
-# State shape:
-# locus_id -> {"mrna": {signature -> amount}, "protein": {signature -> amount}}
+# M5-A state remains unchanged:
+# locus_id -> {"mrna": {coding_signature -> amount}, "protein": {coding_signature -> amount}}
+# M5-B only changes how transcription propensity is calculated. Regulation is
+# derived from physical protein cohorts + inherited promoter motifs + ordinary
+# intracellular ligand concentrations; there are no named response APIs.
 
 static func create_equilibrium_state(genome, config) -> Dictionary:
 	var state: Dictionary = {}
@@ -34,10 +31,12 @@ static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, c
 	_validate_state(state, genome)
 
 	var snapshot: Dictionary = state.duplicate(true)
+	var pool_snapshot: Dictionary = pools.duplicate(true)
 	var tx_proposals: Dictionary = {}
 	var translation_proposals: Dictionary = {}
 	var mrna_decay_proposals: Dictionary = {}
 	var protein_decay_proposals: Dictionary = {}
+	var regulation_factors: Dictionary = {}
 	var total_tx_events: float = 0.0
 	var total_translation_events: float = 0.0
 
@@ -50,7 +49,14 @@ static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, c
 		var mrna_cohorts: Dictionary = prior["mrna"]
 		var protein_cohorts: Dictionary = prior["protein"]
 
-		var tx_lambda: float = float(config.transcription_max_events_per_min) * float(gene.promoter_strength()) * dt
+		var regulation_factor: float = _regulation_factor(gene, snapshot, pool_snapshot, config)
+		regulation_factors[locus_id] = regulation_factor
+		var tx_lambda: float = (
+			float(config.transcription_max_events_per_min)
+			* float(gene.promoter_strength())
+			* regulation_factor
+			* dt
+		)
 		var tx_events: float = float(rng.poisson(tx_lambda))
 		tx_proposals[locus_id] = {"signature": current_signature, "events": tx_events}
 		total_tx_events += tx_events
@@ -85,13 +91,12 @@ static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, c
 	var tx_atp_demand: float = total_tx_events * float(config.transcription_atp_cost_per_event)
 	var tl_atp_demand: float = total_translation_events * float(config.translation_atp_cost_per_event)
 	var total_atp_demand: float = tx_atp_demand + tl_atp_demand
-	var available_atp: float = maxf(0.0, float(pools.get("ATP", 0.0)))
+	var available_atp: float = maxf(0.0, float(pool_snapshot.get("ATP", 0.0)))
 	var atp_scale: float = 1.0 if total_atp_demand <= available_atp or total_atp_demand <= 0.0 else available_atp / total_atp_demand
-
 	var nuc_demand: float = total_tx_events * float(config.transcription_nuc_cost_per_event)
 	var aa_demand: float = total_translation_events * float(config.translation_aa_cost_per_event)
-	var available_nuc: float = maxf(0.0, float(pools.get("NUC", 0.0)))
-	var available_aa: float = maxf(0.0, float(pools.get("AA", 0.0)))
+	var available_nuc: float = maxf(0.0, float(pool_snapshot.get("NUC", 0.0)))
+	var available_aa: float = maxf(0.0, float(pool_snapshot.get("AA", 0.0)))
 	var nuc_scale: float = 1.0 if nuc_demand <= available_nuc or nuc_demand <= 0.0 else available_nuc / nuc_demand
 	var aa_scale: float = 1.0 if aa_demand <= available_aa or aa_demand <= 0.0 else available_aa / aa_demand
 	var tx_scale: float = minf(atp_scale, nuc_scale)
@@ -106,7 +111,6 @@ static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, c
 		var prior: Dictionary = snapshot[locus_id]
 		var next_mrna: Dictionary = prior["mrna"].duplicate(true)
 		var next_protein: Dictionary = prior["protein"].duplicate(true)
-
 		for signature_variant in mrna_decay_proposals[locus_id].keys():
 			var signature: int = int(signature_variant)
 			var amount: float = float(mrna_decay_proposals[locus_id][signature_variant])
@@ -117,19 +121,16 @@ static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, c
 			var amount: float = float(protein_decay_proposals[locus_id][signature_variant])
 			next_protein[signature] = maxf(0.0, float(next_protein.get(signature, 0.0)) - amount)
 			degraded_protein += amount
-
 		var tx_record: Dictionary = tx_proposals[locus_id]
 		var tx_signature: int = int(tx_record["signature"])
 		var tx_events: float = float(tx_record["events"]) * tx_scale
 		next_mrna[tx_signature] = float(next_mrna.get(tx_signature, 0.0)) + tx_events
 		accepted_tx += tx_events
-
 		for signature_variant in translation_proposals[locus_id].keys():
 			var signature: int = int(signature_variant)
 			var events: float = float(translation_proposals[locus_id][signature_variant]) * translation_scale
 			next_protein[signature] = float(next_protein.get(signature, 0.0)) + events
 			accepted_translation += events
-
 		_prune_zero_cohorts(next_mrna)
 		_prune_zero_cohorts(next_protein)
 		state[locus_id] = {"mrna": next_mrna, "protein": next_protein}
@@ -150,32 +151,98 @@ static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, c
 		"protein_degraded": degraded_protein,
 		"atp_spent": synthesis_atp,
 		"tx_scale": tx_scale,
-		"translation_scale": translation_scale
+		"translation_scale": translation_scale,
+		"regulation": regulation_factors
 	}
+
+# Generic promoter regulation. Historical protein cohorts retain their original
+# sequence and therefore their own regulatory/allosteric identity after mutation.
+static func _regulation_factor(target_gene, state_snapshot: Dictionary, pools: Dictionary, config) -> float:
+	if not bool(config.regulation_enabled):
+		return 1.0
+	var activator: float = 0.0
+	var repressor: float = 0.0
+	var loci: Array = state_snapshot.keys()
+	loci.sort()
+	for locus_variant in loci:
+		var locus_id: int = int(locus_variant)
+		var cohorts: Dictionary = state_snapshot[locus_id]["protein"]
+		var signatures: Array = cohorts.keys()
+		signatures.sort()
+		for signature_variant in signatures:
+			var signature: int = int(signature_variant)
+			var distance: int = _hamming_distance(signature, int(target_gene.regulatory_signature))
+			if distance > int(config.regulatory_max_distance):
+				continue
+			var abundance: float = maxf(0.0, float(cohorts[signature_variant])) / float(config.expression_reference_protein_count)
+			var affinity: float = exp(-float(config.regulatory_distance_decay) * float(distance))
+			var occupancy: float = abundance * affinity * _allosteric_factor(signature, pools, config)
+			if (signature & 0x8000) == 0:
+				activator += occupancy
+			else:
+				repressor += occupancy
+	var total: float = activator + repressor
+	var normalized: float = (activator - repressor) / (1.0 + total)
+	return clampf(
+		1.0 + float(config.regulatory_gain) * normalized,
+		float(config.regulatory_min_factor),
+		float(config.regulatory_max_factor)
+	)
+
+# Any metabolite can modulate any compatible protein; molecule names never
+# determine biological interpretation. The strongest compatible ligand is used
+# in M5-B to keep allostery bounded and inspectable.
+static func _allosteric_factor(protein_signature: int, pools: Dictionary, config) -> float:
+	if not bool(config.allostery_enabled):
+		return 1.0
+	var strongest: float = 0.0
+	for metabolite_id in MetaboliteCatalogScript.ids():
+		var amount: float = maxf(0.0, float(pools.get(metabolite_id, 0.0)))
+		if amount <= 0.0:
+			continue
+		var distance: int = _hamming_distance(protein_signature, MetaboliteCatalogScript.ligand_signature(metabolite_id))
+		if distance > int(config.allosteric_max_distance):
+			continue
+		var affinity: float = exp(-float(config.allosteric_distance_decay) * float(distance))
+		var compatible_amount: float = amount * affinity
+		var occupancy: float = compatible_amount / (float(config.allosteric_km) + compatible_amount)
+		strongest = maxf(strongest, occupancy)
+	if strongest <= 0.0:
+		return 1.0
+	var direction: float = -1.0 if (protein_signature & 0x4000) != 0 else 1.0
+	return clampf(
+		1.0 + direction * float(config.allosteric_gain) * strongest,
+		float(config.allosteric_min_factor),
+		float(config.allosteric_max_factor)
+	)
+
+static func _hamming_distance(first_signature: int, second_signature: int) -> int:
+	var value: int = (first_signature ^ second_signature) & 0xFFFF
+	var distance: int = 0
+	while value != 0:
+		distance += value & 1
+		value >>= 1
+	return distance
 
 static func current_gene_protein(state: Dictionary, gene) -> float:
 	var locus_id: int = int(gene.locus_id)
-	if not state.has(locus_id):
-		return 0.0
+	if not state.has(locus_id): return 0.0
 	return maxf(0.0, float(state[locus_id]["protein"].get(int(gene.protein_signature), 0.0)))
 
 static func protein_cohorts_for_locus(state: Dictionary, locus_id: int) -> Dictionary:
-	if not state.has(locus_id):
-		return {}
+	if not state.has(locus_id): return {}
 	return state[locus_id]["protein"]
 
 static func total_mrna(state: Dictionary) -> float:
 	var result: float = 0.0
 	for item in state.values():
-		for amount in item["mrna"].values():
-			result += float(amount)
+		for amount in item["mrna"].values(): result += float(amount)
 	return result
 
 static func total_protein(state: Dictionary) -> float:
 	var result: float = 0.0
 	for item in state.values():
-		for amount in item["protein"].values():
-			result += float(amount)
+		for amount in item["protein"].values(): result += float(amount)
 	return result
 
 static func partition(state: Dictionary, ratio: float, rng, config) -> Array:
@@ -202,8 +269,7 @@ static func partition(state: Dictionary, ratio: float, rng, config) -> Array:
 	return [first, second]
 
 static func _noisy_partition_ratio(base_ratio: float, amount: float, scale: float, rng) -> float:
-	if amount <= 0.0 or scale <= 0.0:
-		return base_ratio
+	if amount <= 0.0 or scale <= 0.0: return base_ratio
 	var attenuation: float = 1.0 / sqrt(maxf(1.0, amount))
 	return clampf(base_ratio + float(rng.randf_range(-scale, scale)) * attenuation, 0.02, 0.98)
 
@@ -250,10 +316,8 @@ static func _validate_state(state: Dictionary, genome) -> void:
 static func _prune_zero_cohorts(cohorts: Dictionary) -> void:
 	var to_remove: Array = []
 	for signature_variant in cohorts.keys():
-		if float(cohorts[signature_variant]) <= 1e-12:
-			to_remove.append(signature_variant)
-	for signature_variant in to_remove:
-		cohorts.erase(signature_variant)
+		if float(cohorts[signature_variant]) <= 1e-12: to_remove.append(signature_variant)
+	for signature_variant in to_remove: cohorts.erase(signature_variant)
 
 static func _empty_summary() -> Dictionary:
 	return {
@@ -263,5 +327,6 @@ static func _empty_summary() -> Dictionary:
 		"protein_degraded": 0.0,
 		"atp_spent": 0.0,
 		"tx_scale": 1.0,
-		"translation_scale": 1.0
+		"translation_scale": 1.0,
+		"regulation": {}
 	}
