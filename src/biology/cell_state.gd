@@ -2,6 +2,7 @@ extends RefCounted
 class_name CellState
 
 const MetabolicSolverScript = preload("res://src/chemistry/metabolic_solver.gd")
+const ExpressionSolverScript = preload("res://src/expression/expression_solver.gd")
 
 var id: int
 var parent_id: int
@@ -13,9 +14,10 @@ var genome = null
 var alive: bool = true
 var death_reason: String = ""
 
-# Authoritative M4 intracellular state. Physical volume is derived from BIO.
 var metabolites: Dictionary = {}
 var last_fluxes: Dictionary = {}
+var expression_state = null
+var last_expression_stats: Dictionary = {}
 var volume: float = 1.0
 var damage: float = 0.0
 var energy_debt: float = 0.0
@@ -36,8 +38,11 @@ func _init(
 	volume = p_volume
 
 func initialize_metabolism(config) -> void:
+	assert(genome != null, "Genome must exist before M5 molecular initialization")
 	metabolites = MetabolicSolverScript.create_initial_pools(volume, config)
+	expression_state = ExpressionSolverScript.initialize(genome, config)
 	last_fluxes = {}
+	last_expression_stats = {}
 	_sync_volume_from_biomass(config)
 
 func pool(metabolite_id: String) -> float:
@@ -66,38 +71,29 @@ func _transport_request(world_field: String, internal_id: String, vmax: float, k
 
 func apply_uptake(uptake: Dictionary) -> void:
 	assert(not metabolites.is_empty())
-	var mapping: Dictionary = {
-		"glucose": "G",
-		"oxygen": "O2",
-		"nitrogen": "NH4",
-		"phosphorus": "P"
-	}
+	var mapping: Dictionary = {"glucose": "G", "oxygen": "O2", "nitrogen": "NH4", "phosphorus": "P"}
 	for world_field in mapping.keys():
 		var amount: float = maxf(0.0, float(uptake.get(world_field, 0.0)))
 		MetabolicSolverScript.add_pool(metabolites, String(mapping[world_field]), amount)
 
-func step_intracellular(dt: float, config, reactions: Array) -> void:
+func step_intracellular(dt: float, config, reactions: Array, rng) -> void:
 	if not alive:
 		return
-	assert(genome != null, "M4 physiology requires a genome")
-	assert(not metabolites.is_empty(), "M4 physiology requires initialized metabolite pools")
+	assert(genome != null and expression_state != null)
+	assert(not metabolites.is_empty())
 
-	last_fluxes = MetabolicSolverScript.step(metabolites, genome, reactions, dt, volume, config)
+	# Expression is evaluated before catalysis. It consumes ATP/precursors and
+	# updates the proteome; the resulting protein abundance then determines all
+	# catalytic capacity for this tick.
+	last_expression_stats = ExpressionSolverScript.step(expression_state, genome, metabolites, dt, rng, config)
+	last_fluxes = MetabolicSolverScript.step(
+		metabolites, genome, reactions, dt, volume, config, expression_state.proteins
+	)
 	_sync_volume_from_biomass(config)
-	_pay_proteome_cost(dt, config)
 	_pay_maintenance(dt, config)
 	_update_damage_and_repair(dt, config)
 	_check_viability(config)
 	_assert_state(config)
-
-func _pay_proteome_cost(dt: float, config) -> void:
-	var expression_units: float = 0.0
-	for gene in genome.genes:
-		expression_units += float(gene.promoter_strength())
-	var required: float = expression_units * float(config.proteome_atp_cost_per_expression_unit_per_volume) * volume * dt
-	var paid: float = MetabolicSolverScript.spend_atp(metabolites, required)
-	if paid < required:
-		energy_debt += required - paid
 
 func _pay_maintenance(dt: float, config) -> void:
 	var required: float = float(config.maintenance_atp_rate_per_volume) * volume * dt
@@ -113,7 +109,6 @@ func _update_damage_and_repair(dt: float, config) -> void:
 	var spontaneous_decay: float = minf(current_ros, current_ros * float(config.spontaneous_ros_decay_rate) * dt)
 	metabolites["ROS"] = current_ros - spontaneous_decay
 	damage += float(config.ros_damage_rate) * pool("ROS") * dt
-
 	var possible_repair: float = minf(damage, float(config.basal_repair_rate) * dt)
 	var requested_cost: float = possible_repair * float(config.repair_atp_cost)
 	var paid: float = MetabolicSolverScript.spend_atp(metabolites, requested_cost)
@@ -138,8 +133,8 @@ func ready_to_divide(config) -> bool:
 
 func create_daughters(first_id: int, second_id: int, tick: int, rng, world, config) -> Array:
 	assert(ready_to_divide(config))
+	assert(expression_state != null)
 	MetabolicSolverScript.spend_atp(metabolites, float(config.division_atp_cost))
-
 	var partition_jitter: float = float(config.partition_jitter)
 	var ratio: float = 0.5 + float(rng.randf_range(-partition_jitter, partition_jitter))
 	var offset_scale: float = float(config.daughter_offset_grid)
@@ -148,11 +143,14 @@ func create_daughters(first_id: int, second_id: int, tick: int, rng, world, conf
 		first_offset = Vector2(offset_scale, 0.0)
 	var second_offset: Vector2 = -first_offset
 
-	var partitions: Array = MetabolicSolverScript.partition(metabolites, ratio)
+	var pool_partitions: Array = MetabolicSolverScript.partition(metabolites, ratio)
+	var expression_partitions: Array = ExpressionSolverScript.partition(expression_state, ratio, rng, config)
 	var first = CellState.new(first_id, id, generation + 1, tick, world.clamp_position(position + first_offset), volume * ratio)
 	var second = CellState.new(second_id, id, generation + 1, tick, world.clamp_position(position + second_offset), volume * (1.0 - ratio))
-	first.metabolites = partitions[0]
-	second.metabolites = partitions[1]
+	first.metabolites = pool_partitions[0]
+	second.metabolites = pool_partitions[1]
+	first.expression_state = expression_partitions[0]
+	second.expression_state = expression_partitions[1]
 	first.damage = damage * ratio
 	second.damage = damage * (1.0 - ratio)
 	first.energy_debt = energy_debt * ratio
@@ -166,13 +164,9 @@ func create_daughters(first_id: int, second_id: int, tick: int, rng, world, conf
 	return [first, second]
 
 func releasable_pools() -> Dictionary:
-	# M4 returns only the four explicitly transported environmental resources.
-	# Generalized lysis and release of organic intermediates/biomass arrives in M7.
 	return {
-		"glucose": maxf(0.0, pool("G")),
-		"oxygen": maxf(0.0, pool("O2")),
-		"nitrogen": maxf(0.0, pool("NH4")),
-		"phosphorus": maxf(0.0, pool("P"))
+		"glucose": maxf(0.0, pool("G")), "oxygen": maxf(0.0, pool("O2")),
+		"nitrogen": maxf(0.0, pool("NH4")), "phosphorus": maxf(0.0, pool("P"))
 	}
 
 func total_adenylate() -> float:
@@ -182,24 +176,20 @@ func total_redox_currency() -> float:
 	return pool("NAD") + pool("NADH")
 
 func _assert_state(config) -> void:
-	assert(volume > 0.0)
-	assert(damage >= -1e-10)
-	assert(energy_debt >= -1e-10)
+	assert(volume > 0.0 and damage >= -1e-10 and energy_debt >= -1e-10)
 	MetabolicSolverScript.assert_nonnegative(metabolites)
 	assert(absf(volume - pool("BIO") / float(config.biomass_units_per_volume)) <= 1e-10)
-	if genome != null:
-		genome.validate()
+	genome.validate()
+	expression_state.assert_matches_genome(genome)
+	expression_state.assert_nonnegative()
 
 func checksum() -> float:
 	var result: float = (
-		float(id) * 0.001
-		+ position.x * 3.0
-		+ position.y * 5.0
-		+ volume * 7.0
-		+ damage * 29.0
-		+ energy_debt * 31.0
-		+ MetabolicSolverScript.checksum(metabolites) * 0.001
+		float(id) * 0.001 + position.x * 3.0 + position.y * 5.0 + volume * 7.0
+		+ damage * 29.0 + energy_debt * 31.0 + MetabolicSolverScript.checksum(metabolites) * 0.001
 	)
 	if genome != null:
 		result += float(genome.checksum()) * 0.013
+	if expression_state != null:
+		result += float(expression_state.checksum()) * 0.00031
 	return result
