@@ -27,7 +27,14 @@ jobs:
         run: godot --version
 
       - name: Parse project headlessly
-        run: godot --headless --editor --path . --quit
+        shell: bash
+        run: |
+          set -o pipefail
+          godot --headless --editor --path . --quit 2>&1 | tee /tmp/godot-parse.log
+          if grep -E "SCRIPT ERROR|Parse Error|Failed to load script" /tmp/godot-parse.log; then
+            echo "Godot parser diagnostics detected."
+            exit 1
+          fi
 
       - name: Run invariant suite
         run: godot --headless --path . --script tests/run_tests.gd
