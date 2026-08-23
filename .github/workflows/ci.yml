@@ -54,5 +54,5 @@ jobs:
       - name: Validate M5 finite proteome budget
         run: godot --headless --path . --script tests/m5_proteome_tests.gd
 
-      - name: Validate M5-C environment-dependent regulatory selection
-        run: godot --headless --path . --script tests/m5c_timescale_confirmation.gd
+      - name: Validate M5-C finite-proteome regulatory selection
+        run: godot --headless --path . --script tests/m5c_proteome_confirmation.gd
