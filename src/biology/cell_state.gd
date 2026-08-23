@@ -42,7 +42,7 @@ func _init(
 func initialize_molecular_state(config) -> void:
 	assert(genome != null, "Genome must exist before molecular initialization")
 	metabolites = MetabolicSolverScript.create_initial_pools(volume, config)
-	expression_state = ExpressionSystemScript.create_equilibrium_state(genome, config)
+	expression_state = ExpressionSystemScript.create_equilibrium_state(genome, config, volume)
 	# The equilibrium constructor predates the finite M5-C proteome budget and
 	# expresses every locus independently. Normalize the initial condition into
 	# the physically admissible proteome without recycling: initialization is a
@@ -69,8 +69,13 @@ func total_mrna() -> float:
 func total_protein() -> float:
 	return ExpressionSystemScript.total_protein(expression_state)
 
+# Proteome is an extensive physical inventory. The historical M5 reference cap
+# applies at ancestor volume; a cell with twice that biomass can physically hold
+# twice as much protein without changing its proteome concentration.
 func proteome_capacity(config) -> float:
-	return float(config.proteome_capacity_reference_units) * float(config.expression_reference_protein_count)
+	var reference_capacity: float = float(config.proteome_capacity_reference_units) * float(config.expression_reference_protein_count)
+	var volume_scale: float = volume / maxf(1e-12, float(config.ancestor_volume))
+	return reference_capacity * maxf(1e-12, volume_scale)
 
 func proteome_utilization(config) -> float:
 	return total_protein() / maxf(1e-12, proteome_capacity(config))
@@ -114,7 +119,7 @@ func step_intracellular(dt: float, config, reactions: Array, rng) -> void:
 	# Expression happens before metabolism for this tick. It consumes current
 	# ATP/material and changes the proteome; metabolism then reads that realized
 	# proteome. No promoter value enters catalytic flux directly.
-	last_expression_summary = ExpressionSystemScript.step(expression_state, genome, metabolites, dt, rng, config)
+	last_expression_summary = ExpressionSystemScript.step(expression_state, genome, metabolites, dt, rng, config, volume)
 	var proteome_summary: Dictionary = _enforce_proteome_budget(config, true)
 	for key in proteome_summary.keys():
 		last_expression_summary[key] = proteome_summary[key]
