@@ -21,33 +21,36 @@ static func step(cell, dt: float, config) -> Dictionary:
 	if float(cell.volume) < float(config.genome_replication_initiation_volume):
 		return _summary(cell, 0.0, 0.0, 0.0, 0.0, false, config)
 
-	var gene_count: float = float(maxi(1, cell.genome.gene_count()))
-	var remaining_gene_equivalents: float = maxf(0.0, gene_count - float(cell.replication_gene_equivalents_copied))
-	if remaining_gene_equivalents <= 1e-12:
-		cell.replication_gene_equivalents_copied = gene_count
+	# Replication units include coding loci plus explicit cis-regulatory DNA.
+	# Historical field names retain "gene_equivalents" for snapshot compatibility,
+	# but their value is now the physically broader DNA-copying unit count.
+	var replication_units: float = maxf(1e-12, float(cell.genome.replication_unit_count()))
+	var remaining_units: float = maxf(0.0, replication_units - float(cell.replication_gene_equivalents_copied))
+	if remaining_units <= 1e-12:
+		cell.replication_gene_equivalents_copied = replication_units
 		cell.replication_progress = 1.0
 		return _summary(cell, 0.0, 0.0, 0.0, 0.0, true, config)
 
 	var repair: float = repair_activity(cell.expression_state, float(cell.volume), config)
-	var requested_gene_equivalents: float = minf(
-		remaining_gene_equivalents,
+	var requested_units: float = minf(
+		remaining_units,
 		float(config.genome_replication_gene_copy_rate_per_min) * dt
 	)
-	var atp_cost_per_gene: float = (
+	var atp_cost_per_unit: float = (
 		float(config.genome_replication_atp_cost_per_gene)
 		+ repair * float(config.dna_repair_atp_cost_per_gene_activity)
 	)
-	var nuc_cost_per_gene: float = float(config.genome_replication_nuc_cost_per_gene)
-	var requested_atp: float = requested_gene_equivalents * atp_cost_per_gene
-	var requested_nuc: float = requested_gene_equivalents * nuc_cost_per_gene
+	var nuc_cost_per_unit: float = float(config.genome_replication_nuc_cost_per_gene)
+	var requested_atp: float = requested_units * atp_cost_per_unit
+	var requested_nuc: float = requested_units * nuc_cost_per_unit
 	var available_atp: float = maxf(0.0, cell.pool("ATP"))
 	var available_nuc: float = maxf(0.0, cell.pool("NUC"))
 	var atp_scale: float = 1.0 if requested_atp <= available_atp or requested_atp <= 0.0 else available_atp / requested_atp
 	var nuc_scale: float = 1.0 if requested_nuc <= available_nuc or requested_nuc <= 0.0 else available_nuc / requested_nuc
 	var resource_scale: float = minf(atp_scale, nuc_scale)
-	var copied: float = requested_gene_equivalents * resource_scale
-	var atp_spent: float = copied * atp_cost_per_gene
-	var nuc_spent: float = copied * nuc_cost_per_gene
+	var copied: float = requested_units * resource_scale
+	var atp_spent: float = copied * atp_cost_per_unit
+	var nuc_spent: float = copied * nuc_cost_per_unit
 
 	var actual_atp: float = MetabolicSolverScript.spend_atp(cell.metabolites, atp_spent)
 	assert(absf(actual_atp - atp_spent) <= 1e-9, "Replication ATP pre-scaling failed")
@@ -56,9 +59,9 @@ static func step(cell, dt: float, config) -> Dictionary:
 	cell.replication_atp_spent += atp_spent
 	cell.replication_nuc_spent += nuc_spent
 	cell.replication_repair_activity_integral += copied * repair
-	cell.replication_progress = clampf(cell.replication_gene_equivalents_copied / gene_count, 0.0, 1.0)
-	if gene_count - cell.replication_gene_equivalents_copied <= 1e-10:
-		cell.replication_gene_equivalents_copied = gene_count
+	cell.replication_progress = clampf(cell.replication_gene_equivalents_copied / replication_units, 0.0, 1.0)
+	if replication_units - cell.replication_gene_equivalents_copied <= 1e-10:
+		cell.replication_gene_equivalents_copied = replication_units
 		cell.replication_progress = 1.0
 
 	return _summary(cell, copied, atp_spent, nuc_spent, repair, replication_complete(cell), config)
@@ -103,6 +106,7 @@ static func mutation_profile(cell, config) -> Dictionary:
 		"mean_repair_activity": mean_repair,
 		"point_error_rate_per_gene": point_probability,
 		"structural_error_rate_per_genome": structural_probability,
+		"replication_units": float(cell.genome.replication_unit_count()),
 		"replication_gene_equivalents": float(cell.replication_gene_equivalents_copied),
 		"replication_atp_spent": float(cell.replication_atp_spent),
 		"replication_nuc_spent": float(cell.replication_nuc_spent)
@@ -126,12 +130,12 @@ static func hamming_distance(first_signature: int, second_signature: int) -> int
 	return distance
 
 static func _summary(cell, copied: float, atp_spent: float, nuc_spent: float, repair: float, complete: bool, config) -> Dictionary:
-	var gene_count: int = maxi(1, cell.genome.gene_count())
 	return {
 		"enabled": bool(config.evolvable_replication_enabled),
 		"started": float(cell.volume) >= float(config.genome_replication_initiation_volume),
 		"complete": complete,
-		"gene_count": gene_count,
+		"gene_count": maxi(1, cell.genome.gene_count()),
+		"replication_units": float(cell.genome.replication_unit_count()),
 		"progress": float(cell.replication_progress),
 		"gene_equivalents_copied": float(cell.replication_gene_equivalents_copied),
 		"copied_this_tick": copied,
