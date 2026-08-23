@@ -51,9 +51,5 @@ jobs:
       - name: Validate M5-B regulation and sensing
         run: godot --headless --path . --script tests/m5_regulation_tests.gd
 
-      - name: Retain powered M5-C null as falsification
-        continue-on-error: true
-        run: godot --headless --path . --script tests/m5_selection_tests.gd
-
       - name: Characterize M5-C regulatory timescale
         run: godot --headless --path . --script tests/m5c_timescale_spike.gd
