@@ -209,9 +209,29 @@ func _update_damage_and_repair(dt: float, config) -> void:
 		possible_repair *= paid / requested_cost
 	damage = maxf(0.0, damage - possible_repair)
 
+# ATP/ADP and NAD/NADH are explicit energetic/redox carrier currencies but are
+# deliberately outside the model's structural C/N/P bookkeeping. Their charge
+# state is physical (metabolism must convert ADP->ATP and NAD->NADH), while the
+# carrier scaffold is implicit cellular material. New biomass therefore adds
+# only discharged/oxidized carrier capacity. The previous fixed founder-wide
+# carrier inventory was an artificial population ceiling: after enough divisions
+# no cell could hold the ATP required for another division even with nutrients.
 func _sync_volume_from_biomass(config) -> void:
-	volume = pool("BIO") / float(config.biomass_units_per_volume)
-	assert(volume > 0.0, "Living cell cannot have zero structural biomass")
+	var previous_volume: float = volume
+	var next_volume: float = pool("BIO") / float(config.biomass_units_per_volume)
+	assert(next_volume > 0.0, "Living cell cannot have zero structural biomass")
+	var added_volume: float = maxf(0.0, next_volume - previous_volume)
+	if added_volume > 0.0:
+		var adenylate_capacity_per_volume: float = (
+			float(config.initial_atp_per_volume) + float(config.initial_adp_per_volume)
+		)
+		var redox_capacity_per_volume: float = (
+			float(config.initial_nad_per_volume) + float(config.initial_nadh_per_volume)
+		)
+		# Capacity is born uncharged: no ATP or NADH is gifted by cell growth.
+		metabolites["ADP"] = float(metabolites.get("ADP", 0.0)) + added_volume * adenylate_capacity_per_volume
+		metabolites["NAD"] = float(metabolites.get("NAD", 0.0)) + added_volume * redox_capacity_per_volume
+	volume = next_volume
 
 func _check_viability(config) -> void:
 	if damage >= float(config.lethal_damage):
@@ -275,7 +295,10 @@ func _reset_replication_cycle() -> void:
 # the reverse structural-biomass reaction (2 AA + 1 LIP + 2 NUC per BIO). The
 # material physically stored in mRNA and protein is also returned to NUC and AA
 # using the same per-molecule accounting used by M5 expression. Together these
-# operations conserve the model's structural C/N/P across cell death.
+# operations conserve the model's structural C/N/P across cell death. ATP/ADP
+# and NAD/NADH are carrier-state variables with zero modeled C/N/P; their stored
+# chemical energy/redox state dissipates at lysis while their implicit scaffold
+# material is already represented by the recycled cellular biomass.
 func releasable_pools(config) -> Dictionary:
 	var result: Dictionary = {}
 	for metabolite_id in MetaboliteCatalogScript.extracellular_ids():
