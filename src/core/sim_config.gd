@@ -17,6 +17,38 @@ var oxygen_diffusion: float = 1.00
 var nitrogen_diffusion: float = 0.70
 var phosphorus_diffusion: float = 0.50
 
+# M7 secondary extracellular chemistry. These are generic chamber properties,
+# keyed by intracellular metabolite identity so the world/cell mapping remains
+# centralized in MetaboliteCatalog. Zero initial amounts keep the M0-M6 basal
+# environment unchanged while allowing lysis/secretion to populate the fields.
+const SECONDARY_EXTRACELLULAR_IDS: Array[String] = [
+	"C2", "C3", "W1", "W2", "CO2", "AA", "LIP", "NUC", "ROS", "X"
+]
+var secondary_extracellular_initial: Dictionary = {
+	"C2": 0.0,
+	"C3": 0.0,
+	"W1": 0.0,
+	"W2": 0.0,
+	"CO2": 0.0,
+	"AA": 0.0,
+	"LIP": 0.0,
+	"NUC": 0.0,
+	"ROS": 0.0,
+	"X": 0.0
+}
+var secondary_extracellular_diffusion: Dictionary = {
+	"C2": 0.65,
+	"C3": 0.55,
+	"W1": 0.60,
+	"W2": 0.50,
+	"CO2": 1.20,
+	"AA": 0.35,
+	"LIP": 0.10,
+	"NUC": 0.25,
+	"ROS": 1.00,
+	"X": 0.75
+}
+
 var glucose_transport_vmax: float = 0.60
 var glucose_transport_km: float = 0.80
 var oxygen_transport_vmax: float = 0.90
@@ -94,6 +126,26 @@ var neutral_marker_mutation_rate_per_gene: float = 0.001
 var promoter_mutation_step_max: int = 250
 var protein_signature_bits: int = 16
 
+func extracellular_initial_amount(metabolite_id: String) -> float:
+	match metabolite_id:
+		"G": return initial_glucose
+		"O2": return initial_oxygen
+		"NH4": return initial_nitrogen
+		"P": return initial_phosphorus
+		_:
+			assert(secondary_extracellular_initial.has(metabolite_id), "Missing extracellular initial amount: %s" % metabolite_id)
+			return float(secondary_extracellular_initial[metabolite_id])
+
+func extracellular_diffusion_coefficient(metabolite_id: String) -> float:
+	match metabolite_id:
+		"G": return glucose_diffusion
+		"O2": return oxygen_diffusion
+		"NH4": return nitrogen_diffusion
+		"P": return phosphorus_diffusion
+		_:
+			assert(secondary_extracellular_diffusion.has(metabolite_id), "Missing extracellular diffusion coefficient: %s" % metabolite_id)
+			return float(secondary_extracellular_diffusion[metabolite_id])
+
 func validate() -> void:
 	assert(tick_dt_min > 0.0)
 	assert(world_width > 2 and world_height > 2)
@@ -108,6 +160,16 @@ func validate() -> void:
 	assert(oxygen_diffusion * tick_dt_min / dx2 <= 0.25)
 	assert(nitrogen_diffusion * tick_dt_min / dx2 <= 0.25)
 	assert(phosphorus_diffusion * tick_dt_min / dx2 <= 0.25)
+	assert(secondary_extracellular_initial.size() == SECONDARY_EXTRACELLULAR_IDS.size())
+	assert(secondary_extracellular_diffusion.size() == SECONDARY_EXTRACELLULAR_IDS.size())
+	for metabolite_id in SECONDARY_EXTRACELLULAR_IDS:
+		assert(secondary_extracellular_initial.has(metabolite_id), "Missing secondary extracellular initial amount: %s" % metabolite_id)
+		assert(secondary_extracellular_diffusion.has(metabolite_id), "Missing secondary extracellular diffusion coefficient: %s" % metabolite_id)
+		var initial_amount: float = float(secondary_extracellular_initial[metabolite_id])
+		var diffusion: float = float(secondary_extracellular_diffusion[metabolite_id])
+		assert(initial_amount >= 0.0)
+		assert(diffusion >= 0.0)
+		assert(diffusion * tick_dt_min / dx2 <= 0.25, "Unstable secondary extracellular diffusion: %s" % metabolite_id)
 	assert(glucose_transport_vmax >= 0.0 and oxygen_transport_vmax >= 0.0)
 	assert(nitrogen_transport_vmax >= 0.0 and phosphorus_transport_vmax >= 0.0)
 	assert(metabolic_substeps_per_tick >= 1)
