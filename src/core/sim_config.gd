@@ -1,8 +1,9 @@
 extends RefCounted
 class_name SimConfig
 
-# Time and world scale. Units are intentionally explicit even though M0-M2
-# remain a compressed biochemical model rather than a quantitative bacterium.
+# Time and world scale. Units are intentionally explicit even though the early
+# milestones remain a compressed biochemical model rather than a calibrated
+# quantitative bacterium.
 var tick_dt_min: float = 0.10
 var world_width: int = 64
 var world_height: int = 64
@@ -10,8 +11,7 @@ var grid_cell_size_um: float = 1.0
 var max_cells: int = 64
 var seed: int = 824718
 
-# Environment concentrations (arbitrary concentration units for the first
-# vertical slice; the model is dimensionless-but-consistent at this stage).
+# Environment concentrations.
 var initial_glucose: float = 4.0
 var initial_oxygen: float = 5.0
 var glucose_diffusion: float = 0.80
@@ -50,6 +50,17 @@ var division_atp_cost: float = 1.0
 var partition_jitter: float = 0.02
 var daughter_offset_grid: float = 0.20
 
+# M3 genetics. These rates are per gene per replication event. They are
+# externally configured scaffolding until M10 derives mutation rate from
+# evolved replication/repair machinery. M3 mutations are molecularly neutral
+# because genotype-to-phenotype interpretation arrives in M4/M5.
+var mutation_enabled: bool = true
+var promoter_mutation_rate_per_gene: float = 0.001
+var signature_mutation_rate_per_gene: float = 0.001
+var neutral_marker_mutation_rate_per_gene: float = 0.001
+var promoter_mutation_step_max: int = 250
+var protein_signature_bits: int = 16
+
 func validate() -> void:
 	assert(tick_dt_min > 0.0)
 	assert(world_width > 2 and world_height > 2)
@@ -57,9 +68,14 @@ func validate() -> void:
 	assert(max_cells >= 1)
 	assert(initial_glucose >= 0.0 and initial_oxygen >= 0.0)
 	assert(glucose_diffusion >= 0.0 and oxygen_diffusion >= 0.0)
-	var alpha_g := glucose_diffusion * tick_dt_min / (grid_cell_size_um * grid_cell_size_um)
-	var alpha_o := oxygen_diffusion * tick_dt_min / (grid_cell_size_um * grid_cell_size_um)
+	var alpha_g: float = glucose_diffusion * tick_dt_min / (grid_cell_size_um * grid_cell_size_um)
+	var alpha_o: float = oxygen_diffusion * tick_dt_min / (grid_cell_size_um * grid_cell_size_um)
 	assert(alpha_g <= 0.25, "Explicit 2D diffusion unstable for glucose: alpha must be <= 0.25")
 	assert(alpha_o <= 0.25, "Explicit 2D diffusion unstable for oxygen: alpha must be <= 0.25")
 	assert(division_volume > ancestor_volume)
 	assert(partition_jitter >= 0.0 and partition_jitter < 0.5)
+	assert(promoter_mutation_rate_per_gene >= 0.0 and promoter_mutation_rate_per_gene <= 1.0)
+	assert(signature_mutation_rate_per_gene >= 0.0 and signature_mutation_rate_per_gene <= 1.0)
+	assert(neutral_marker_mutation_rate_per_gene >= 0.0 and neutral_marker_mutation_rate_per_gene <= 1.0)
+	assert(promoter_mutation_step_max >= 1)
+	assert(protein_signature_bits >= 1 and protein_signature_bits <= 16)
