@@ -293,12 +293,13 @@ func _reset_replication_cycle() -> void:
 # Lysis exposes every metabolite that has a physical extracellular field. BIO
 # is not discarded: it is hydrolyzed into the exact precursor stoichiometry of
 # the reverse structural-biomass reaction (2 AA + 1 LIP + 2 NUC per BIO). The
-# material physically stored in mRNA and protein is also returned to NUC and AA
-# using the same per-molecule accounting used by M5 expression. Together these
-# operations conserve the model's structural C/N/P across cell death. ATP/ADP
-# and NAD/NADH are carrier-state variables with zero modeled C/N/P; their stored
-# chemical energy/redox state dissipates at lysis while their implicit scaffold
-# material is already represented by the recycled cellular biomass.
+# material physically stored in mRNA/protein and M10 DNA is also returned to
+# NUC/AA. Resident chromosome material is derived from current architecture;
+# any partially or fully synthesized second copy contributes the NUC actually
+# spent on replication. Thus cell death cannot silently erase modeled C/N/P.
+# ATP/ADP and NAD/NADH are carrier-state variables with zero modeled C/N/P;
+# stored chemical energy/redox state dissipates at lysis while their implicit
+# scaffold material is represented by recycled cellular biomass.
 func releasable_pools(config) -> Dictionary:
 	var result: Dictionary = {}
 	for metabolite_id in MetaboliteCatalogScript.extracellular_ids():
@@ -309,6 +310,9 @@ func releasable_pools(config) -> Dictionary:
 	var aa_field: String = MetaboliteCatalogScript.extracellular_field("AA")
 	var lip_field: String = MetaboliteCatalogScript.extracellular_field("LIP")
 	var nuc_field: String = MetaboliteCatalogScript.extracellular_field("NUC")
+	var dna_nuc_material: float = 0.0
+	if genome != null:
+		dna_nuc_material = DNAReplicationScript.total_cell_dna_nuc_material(self, config)
 	result[aa_field] = (
 		float(result.get(aa_field, 0.0))
 		+ 2.0 * structural_biomass
@@ -319,6 +323,7 @@ func releasable_pools(config) -> Dictionary:
 		float(result.get(nuc_field, 0.0))
 		+ 2.0 * structural_biomass
 		+ total_mrna() * float(config.transcription_nuc_cost_per_event)
+		+ dna_nuc_material
 	)
 	return result
 
