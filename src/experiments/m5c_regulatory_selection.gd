@@ -35,13 +35,18 @@ const GLUCOSE_RESERVOIR: float = 4.0
 const NITROGEN_RESERVOIR: float = 3.0
 const PHOSPHORUS_RESERVOIR: float = 2.0
 const FOUNDERS_PER_GENOTYPE: int = 2
+const DEFAULT_TARGET_DIVISIONS: int = 20
+const DEFAULT_MAX_TICKS: int = 3600
 
 static func create_config(seed: int):
 	var config = SimConfigScript.new()
 	config.seed = seed
 	config.world_width = 4
 	config.world_height = 4
-	config.max_cells = 512
+	# The assay terminates after a fixed number of division events. This cap is
+	# deliberately far above any expected endpoint so SimulationEngine's
+	# sequential near-cap division handling cannot influence genotype frequency.
+	config.max_cells = 128
 	config.glucose_diffusion = 0.0
 	config.oxygen_diffusion = 0.0
 	config.nitrogen_diffusion = 0.0
@@ -105,8 +110,13 @@ static func oxygen_for_tick(condition: String, tick: int) -> float:
 	var phase: int = (tick / PHASE_TICKS) % 2
 	return FLUCTUATING_OXYGEN_HIGH if phase == 0 else FLUCTUATING_OXYGEN_LOW
 
-static func run_replicate(seed: int, condition: String, ticks: int = 3600) -> Dictionary:
-	assert(ticks > 0)
+static func run_replicate(
+	seed: int,
+	condition: String,
+	max_ticks: int = DEFAULT_MAX_TICKS,
+	target_divisions: int = DEFAULT_TARGET_DIVISIONS
+) -> Dictionary:
+	assert(max_ticks > 0 and target_divisions > 0)
 	var config = create_config(seed)
 	var sim = SimulationEngineScript.new(config)
 	var genomes: Dictionary = create_competitor_genomes()
@@ -117,11 +127,13 @@ static func run_replicate(seed: int, condition: String, ticks: int = 3600) -> Di
 
 	_seed_founders(sim, responsive, constitutive, seed)
 	var realized_ticks: int = 0
-	for tick in range(ticks):
+	var division_events: int = 0
+	for tick in range(max_ticks):
 		_maintain_environment(sim, oxygen_for_tick(condition, tick))
 		sim.step(1)
 		realized_ticks += 1
-		if sim.cells.is_empty():
+		division_events = _division_event_count(sim)
+		if division_events >= target_divisions or sim.cells.is_empty():
 			break
 
 	var responsive_count: int = 0
@@ -141,6 +153,7 @@ static func run_replicate(seed: int, condition: String, ticks: int = 3600) -> Di
 
 	var classified: int = responsive_count + constitutive_count
 	assert(classified == sim.population_size(), "M5-C mutation-free competition produced an unexpected genotype")
+	assert(classified < int(config.max_cells), "M5-C endpoint touched population cap and is not a valid selection assay")
 	var responsive_fraction: float = 0.0 if classified == 0 else float(responsive_count) / float(classified)
 	# Pseudocount is an analysis guard for extinction, not a reproductive score.
 	var log_ratio: float = log((float(responsive_count) + 0.5) / (float(constitutive_count) + 0.5))
@@ -148,6 +161,9 @@ static func run_replicate(seed: int, condition: String, ticks: int = 3600) -> Di
 		"seed": seed,
 		"condition": condition,
 		"ticks": realized_ticks,
+		"division_events": division_events,
+		"target_divisions": target_divisions,
+		"reached_target": division_events >= target_divisions,
 		"population": classified,
 		"responsive": responsive_count,
 		"constitutive": constitutive_count,
@@ -158,14 +174,18 @@ static func run_replicate(seed: int, condition: String, ticks: int = 3600) -> Di
 		"mean_r03_constitutive": 0.0 if constitutive_count == 0 else constitutive_r03 / float(constitutive_count)
 	}
 
-static func run_paired_replicates(seeds: Array, ticks: int = 3600) -> Dictionary:
+static func run_paired_replicates(
+	seeds: Array,
+	max_ticks: int = DEFAULT_MAX_TICKS,
+	target_divisions: int = DEFAULT_TARGET_DIVISIONS
+) -> Dictionary:
 	var stable_results: Array = []
 	var fluctuating_results: Array = []
 	var paired_differences: Array = []
 	for seed_variant in seeds:
 		var seed: int = int(seed_variant)
-		var stable: Dictionary = run_replicate(seed, CONDITION_STABLE, ticks)
-		var fluctuating: Dictionary = run_replicate(seed, CONDITION_FLUCTUATING, ticks)
+		var stable: Dictionary = run_replicate(seed, CONDITION_STABLE, max_ticks, target_divisions)
+		var fluctuating: Dictionary = run_replicate(seed, CONDITION_FLUCTUATING, max_ticks, target_divisions)
 		stable_results.append(stable)
 		fluctuating_results.append(fluctuating)
 		paired_differences.append(float(fluctuating["log_ratio"]) - float(stable["log_ratio"]))
@@ -200,6 +220,13 @@ static func _seed_founders(sim, responsive, constitutive, seed: int) -> void:
 		sim.cells.append(cell)
 		next_id += 1
 	sim.next_cell_id = next_id
+
+static func _division_event_count(sim) -> int:
+	var result: int = 0
+	for event in sim.event_log:
+		if String(event.get("kind", "")) == "division":
+			result += 1
+	return result
 
 static func _maintain_environment(sim, oxygen_value: float) -> void:
 	_fill_field(sim.world.get_field("glucose"), GLUCOSE_RESERVOIR)
