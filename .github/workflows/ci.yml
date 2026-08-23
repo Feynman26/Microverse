@@ -51,5 +51,8 @@ jobs:
       - name: Validate M5-B regulation and sensing
         run: godot --headless --path . --script tests/m5_regulation_tests.gd
 
+      - name: Validate M5 finite proteome budget
+        run: godot --headless --path . --script tests/m5_proteome_tests.gd
+
       - name: Validate M5-C environment-dependent regulatory selection
         run: godot --headless --path . --script tests/m5c_timescale_confirmation.gd
