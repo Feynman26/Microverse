@@ -129,6 +129,26 @@ var division_atp_cost: float = 1.0
 var partition_jitter: float = 0.02
 var daughter_offset_grid: float = 0.20
 
+# M10 mechanistic DNA replication. Genome copying is a time-resolved molecular
+# process rather than an instantaneous division surcharge. Every copied gene
+# consumes nucleotide material and ATP. A fixed genes/min copying throughput
+# makes larger genomes take proportionally more time even under abundant
+# resources. Sequence-derived repair activity can lower replication errors, but
+# increases ATP cost per copied gene; there is no mutator/fidelity phenotype flag.
+var evolvable_replication_enabled: bool = true
+var genome_replication_initiation_volume: float = 1.20
+var genome_replication_gene_copy_rate_per_min: float = 1.00
+var genome_replication_nuc_cost_per_gene: float = 0.010
+var genome_replication_atp_cost_per_gene: float = 0.020
+var dna_repair_max_distance: int = 4
+var dna_repair_distance_decay: float = 0.70
+var dna_repair_fidelity_gain: float = 8.0
+var dna_repair_atp_cost_per_gene_activity: float = 0.010
+var baseline_point_error_rate_per_gene: float = 0.002
+var minimum_point_error_rate_per_gene: float = 0.00001
+var baseline_structural_error_rate_per_genome: float = 0.002
+var minimum_structural_error_rate_per_genome: float = 0.00001
+
 # M6 physical-cell mechanics and broad-phase indexing.
 var ancestor_radius_grid: float = 0.45
 var mechanical_relaxation_iterations: int = 16
@@ -137,6 +157,9 @@ var mechanical_overlap_tolerance: float = 1e-4
 var mechanical_use_spatial_index: bool = true
 var mechanical_neighbor_bucket_size_grid: float = 2.0
 
+# Legacy M3 point-mutation knobs remain available for direct historical assays.
+# The production simulation switches to M10 replication-derived probabilities
+# when evolvable_replication_enabled is true.
 var mutation_enabled: bool = true
 var promoter_mutation_rate_per_gene: float = 0.001
 var signature_mutation_rate_per_gene: float = 0.001
@@ -223,6 +246,18 @@ func validate() -> void:
 	assert(allosteric_min_factor >= 0.0 and allosteric_max_factor >= allosteric_min_factor)
 	assert(division_volume > ancestor_volume)
 	assert(partition_jitter >= 0.0 and partition_jitter < 0.5)
+	assert(genome_replication_initiation_volume >= ancestor_volume and genome_replication_initiation_volume < division_volume)
+	assert(genome_replication_gene_copy_rate_per_min > 0.0)
+	assert(genome_replication_nuc_cost_per_gene >= 0.0)
+	assert(genome_replication_atp_cost_per_gene >= 0.0)
+	assert(dna_repair_max_distance >= 0 and dna_repair_max_distance <= 16)
+	assert(dna_repair_distance_decay >= 0.0)
+	assert(dna_repair_fidelity_gain >= 0.0)
+	assert(dna_repair_atp_cost_per_gene_activity >= 0.0)
+	assert(baseline_point_error_rate_per_gene >= 0.0 and baseline_point_error_rate_per_gene <= 1.0)
+	assert(minimum_point_error_rate_per_gene >= 0.0 and minimum_point_error_rate_per_gene <= baseline_point_error_rate_per_gene)
+	assert(baseline_structural_error_rate_per_genome >= 0.0 and baseline_structural_error_rate_per_genome <= 1.0)
+	assert(minimum_structural_error_rate_per_genome >= 0.0 and minimum_structural_error_rate_per_genome <= baseline_structural_error_rate_per_genome)
 	assert(ancestor_radius_grid > 0.0)
 	assert(mechanical_relaxation_iterations >= 1)
 	assert(mechanical_relaxation_fraction > 0.0 and mechanical_relaxation_fraction <= 1.0)
