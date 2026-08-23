@@ -14,12 +14,62 @@ The project deliberately separates **digital physics/chemistry** from **evolvabl
 6. **Observability.** Important births, deaths, mutations, lineage changes and interventions must be reconstructable.
 7. **Small world, deep biology.** Initial scope is a microchamber with tens of cells and a deliberately compressed biochemical model.
 
-## Initial vertical slice
+## Current vertical slice: M0-M2
 
-The first implementation milestone establishes the minimum causal chain:
+The foundation branch establishes the causal chain:
 
-`environmental nutrient -> membrane uptake -> metabolism -> ATP -> maintenance/biomass -> growth -> division`
+`environmental nutrient -> membrane uptake -> metabolism -> ATP -> maintenance/repair/biomass -> growth -> division`
 
-It also includes a spatial diffusion field, seeded deterministic RNG, headless simulation, invariant checks and a minimal renderer. Evolution, regulatory networks and evolvable reaction affinity are introduced only after the basal physiology is numerically stable.
+Implemented foundation components:
 
-Detailed architecture and scientific assumptions live under `docs/` as the implementation is built.
+- closed 2D microchamber;
+- glucose and oxygen diffusion;
+- explicit numerical stability validation;
+- simultaneous/fair local resource allocation;
+- saturable nutrient transport;
+- compressed respiration and ATP generation;
+- maintenance, energetic debt, ROS, damage and repair;
+- precursor-dependent biomass growth;
+- division into two new daughter identities with stochastic partitioning;
+- lineage events;
+- deterministic seeded RNG and whole-state checksum;
+- time-control observer UI;
+- headless invariant tests.
+
+Fixed ancestral trait scales in M0-M2 are scaffolding only. They are replaced by inherited genome/proteome mechanisms beginning in M3-M5.
+
+## Requirements
+
+- Godot 4.7.2 (standard build; no .NET required)
+
+CI installs the same stable engine version.
+
+## Run
+
+Open `project.godot` in Godot and run the project.
+
+Controls:
+
+- `Space`: pause/resume;
+- `1`: 1x experimental clock;
+- `2`: 10x;
+- `3`: 100x;
+- `4`: 1000x;
+- `5`: 5000x.
+
+The initial renderer shows the extracellular glucose field, cells, virtual time, population, generation, resource totals, event count, seed and deterministic state checksum.
+
+## Headless validation
+
+```bash
+godot --headless --editor --path . --quit
+godot --headless --path . --script tests/run_tests.gd
+```
+
+The current tests verify diffusion conservation/nonnegativity, fair allocation of a scarce shared resource, resource-supported division, starvation death and same-seed reproducibility.
+
+## Documentation
+
+- `docs/ARCHITECTURE.md` — system boundaries, tick semantics, target genome/protein/chemistry architecture, persistence, analytics and performance rules.
+- `docs/SCIENTIFIC_MODEL.md` — biological abstractions, equations, assumptions, limitations and validation hierarchy.
+- `docs/ROADMAP.md` — gate-driven implementation from M0 through open evolution, laboratory tooling, evolved mutation rate, motility/information and horizontal transfer.
