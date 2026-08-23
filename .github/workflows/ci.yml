@@ -57,5 +57,5 @@ jobs:
       - name: Validate M5 finite proteome budget
         run: godot --headless --path . --script tests/m5_proteome_tests.gd
 
-      - name: Validate final amplified M5-C genotype-by-environment selection
-        run: godot --headless --path . --script tests/m5c_amplified_gxe_confirmation.gd
+      - name: Validate final M5-C reproductive success
+        run: godot --headless --path . --script tests/m5c_reproductive_success_confirmation.gd
