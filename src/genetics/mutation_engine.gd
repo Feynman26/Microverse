@@ -42,11 +42,23 @@ func mutate_copy(parent_genome, rng, config) -> Dictionary:
 # gene; if an error occurs, its molecular target is chosen without a beneficial
 # or deleterious classification. Structural copying errors are genome-level and
 # use the same replication-derived profile.
-func mutate_replicated_copy(parent_genome, rng, config, replication_profile: Dictionary) -> Dictionary:
+#
+# Size-increasing structural errors need real nucleotide precursor. The optional
+# budget is supplied by the newborn's free NUC pool after ordinary partition.
+# If a sampled duplication cannot be materially built, the structural event is
+# recorded as blocked while point mutations from the same replication remain.
+func mutate_replicated_copy(
+	parent_genome,
+	rng,
+	config,
+	replication_profile: Dictionary,
+	structural_expansion_nuc_budget: float = INF
+) -> Dictionary:
 	var child_genome = parent_genome.deep_copy()
 	var events: Array = []
+	var dna_nuc_material_delta: float = 0.0
 	if not bool(config.mutation_enabled):
-		return {"genome": child_genome, "events": events}
+		return {"genome": child_genome, "events": events, "dna_nuc_material_delta": 0.0}
 
 	var point_probability: float = clampf(float(replication_profile.get("point_error_rate_per_gene", 0.0)), 0.0, 1.0)
 	var structural_probability: float = clampf(float(replication_profile.get("structural_error_rate_per_genome", 0.0)), 0.0, 1.0)
@@ -67,13 +79,40 @@ func mutate_replicated_copy(parent_genome, rng, config, replication_profile: Dic
 
 	if float(rng.randf()) < structural_probability:
 		var operation: String = STRUCTURAL_OPERATIONS[int(rng.randi_range(0, STRUCTURAL_OPERATIONS.size() - 1))]
+		# Preserve point mutations while allowing only the structural edit to be
+		# rejected if it would require nucleotide material the daughter lacks.
+		var pre_structural = child_genome.deep_copy()
+		var units_before: float = float(child_genome.replication_unit_count())
 		var structural_event: Dictionary = apply_structural_mutation(child_genome, operation, rng)
+		var units_after: float = float(child_genome.replication_unit_count())
+		var units_delta: float = units_after - units_before
+		var material_delta: float = units_delta * float(config.genome_replication_nuc_cost_per_gene)
+		var available_budget: float = maxf(0.0, structural_expansion_nuc_budget)
+		if material_delta > available_budget + 1e-12:
+			child_genome = pre_structural
+			structural_event = {
+				"mutation_type": operation + "_blocked",
+				"reason": "insufficient_nucleotide_material",
+				"requested_replication_units_delta": units_delta,
+				"requested_dna_nuc_material_delta": material_delta,
+				"available_nuc_material": available_budget
+			}
+			material_delta = 0.0
+			units_delta = 0.0
+		else:
+			structural_event["replication_units_delta"] = units_delta
+			structural_event["dna_nuc_material_delta"] = material_delta
+			dna_nuc_material_delta = material_delta
 		structural_event["replication_derived"] = true
 		structural_event["error_probability"] = structural_probability
 		events.append(structural_event)
 
 	child_genome.validate()
-	return {"genome": child_genome, "events": events}
+	return {
+		"genome": child_genome,
+		"events": events,
+		"dna_nuc_material_delta": dna_nuc_material_delta
+	}
 
 # Public controlled operator used by M10 validation. It edits only the supplied
 # genome and never assigns biological value to the change.
