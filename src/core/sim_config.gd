@@ -56,6 +56,13 @@ var expression_partition_noise_scale: float = 0.12
 # This is a global physical constraint, not a genotype-specific fitness trait.
 var proteome_capacity_reference_units: float = 5.0
 
+# Shared translation machinery. All mRNA cohorts compete simultaneously for a
+# finite ribosomal throughput proportional to the maximum proteome. At the
+# default 800-protein capacity, 0.06 corresponds to 48 translation events/min.
+# Basal protein turnover is ~40 proteins/min, leaving limited spare throughput
+# for environmental remodeling. No locus or protein identity receives priority.
+var translation_capacity_fraction_of_proteome_per_min: float = 0.06
+
 # M5-B generic promoter regulation. Any physical protein sequence cohort can
 # bind any promoter motif if its 16-bit signature is close enough. No gene is
 # tagged as a named transcription factor or behavior controller.
@@ -130,6 +137,7 @@ func validate() -> void:
 	assert(translation_atp_cost_per_event >= 0.0 and translation_aa_cost_per_event >= 0.0)
 	assert(expression_partition_noise_scale >= 0.0 and expression_partition_noise_scale < 0.5)
 	assert(proteome_capacity_reference_units > 0.0)
+	assert(translation_capacity_fraction_of_proteome_per_min > 0.0 and translation_capacity_fraction_of_proteome_per_min <= 1.0)
 	assert(regulatory_max_distance >= 0 and regulatory_max_distance <= 16)
 	assert(regulatory_distance_decay >= 0.0 and regulatory_gain >= 0.0)
 	assert(regulatory_min_factor >= 0.0 and regulatory_max_factor >= regulatory_min_factor)
