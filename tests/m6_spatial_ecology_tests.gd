@@ -114,8 +114,8 @@ func _test_position_alone_changes_ecological_outcome() -> void:
 	# Only the ancestor's position differs relative to one fixed resource patch.
 	var rich_sim = _build_patch_sim(Vector2(4.0, 4.0))
 	var poor_sim = _build_patch_sim(Vector2(12.0, 12.0))
-	rich_sim.step(1000)
-	poor_sim.step(1000)
+	rich_sim.step(1600)
+	poor_sim.step(1600)
 
 	_assert_true(rich_sim.population_size() > 0, "cell placed inside the resource patch remains viable")
 	_assert_true(rich_sim.maximum_generation() >= 1, "local resource access can propagate through chemistry to reproduction")
@@ -198,8 +198,8 @@ func _maximum_distance(cells: Array, center: Vector2) -> float:
 func _test_same_seed_replays_spatial_trajectory() -> void:
 	var first = _build_patch_sim(Vector2(4.0, 4.0))
 	var second = _build_patch_sim(Vector2(4.0, 4.0))
-	first.step(1000)
-	second.step(1000)
+	first.step(1600)
+	second.step(1600)
 
 	_assert_close(first.checksum(), second.checksum(), 1e-12, "same seed and same spatial environment reproduce the complete world checksum")
 	_assert_true(first.event_log == second.event_log, "same seed reproduces exact birth/division/death history under M6 mechanics")
