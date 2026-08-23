@@ -41,7 +41,7 @@ func seed_ancestor(position: Vector2 = Vector2(-1.0, -1.0)):
 		position = Vector2(float(config.world_width - 1) * 0.5, float(config.world_height - 1) * 0.5)
 	var cell = CellStateScript.new(_allocate_cell_id(), -1, 0, tick_index, world.clamp_position(position), config.ancestor_volume)
 	cell.genome = GenomeScript.create_ancestor()
-	cell.initialize_metabolism(config)
+	cell.initialize_molecular_state(config)
 	cells.append(cell)
 	_record_event("birth", {
 		"cell_id": cell.id,
@@ -61,9 +61,12 @@ func _step_once() -> void:
 	world.diffuse(dt)
 	_allocate_membrane_transport(dt)
 
+	# All stochastic expression, molecular partition and mutation draws share the
+	# universe RNG. Replaying the same seed/state therefore reproduces phenotype
+	# noise as well as genetic history.
 	for cell in cells:
 		if cell.alive:
-			cell.step_intracellular(dt, config, reactions)
+			cell.step_intracellular(dt, config, reactions, rng)
 
 	_process_deaths()
 	_process_divisions()
@@ -71,9 +74,6 @@ func _step_once() -> void:
 	tick_index += 1
 	simulation_time_min += dt
 
-# All transported resources use the same request -> site-scale -> application
-# protocol. Availability is sampled once after diffusion; no cell receives a
-# priority merely because it is earlier in the array.
 func _allocate_membrane_transport(dt: float) -> void:
 	var records: Array = []
 	var totals: Dictionary = {}
