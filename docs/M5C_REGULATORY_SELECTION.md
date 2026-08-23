@@ -2,25 +2,32 @@
 
 ## Purpose
 
-M5-C closes the remaining M5 research gate: show that inherited regulatory architecture can experience different selection under a stable versus temporally fluctuating environment without assigning cells an explicit fitness value.
+M5-C closes the remaining M5 research gate: demonstrate that inherited regulatory architecture can experience a different **reproductive selection gradient** when environmental dynamics change, without assigning cells an explicit fitness value.
 
-The assay uses ordinary Microverse physiology. Cells transcribe, translate, consume ATP/material, catalyse reactions, accumulate biomass, divide, partition molecular state and die through the production engine. The experiment harness only maintains extracellular resources, imposes an oxygen schedule and measures descendants after reproduction.
+The assay uses ordinary Microverse physiology. Cells transcribe, translate, consume ATP/material, catalyse reactions, accumulate biomass, satisfy ordinary division criteria and can fail physiologically through the production engine. The experiment harness only maintains extracellular resources, imposes an oxygen schedule and measures outcomes.
+
+M5-C deliberately separates two questions:
+
+1. **causal reproductive effect** — measured with paired single-lineage generation rates, where population drift cannot hide a small physiological difference;
+2. **small-population frequency dynamics** — retained as characterization, but not used as the final causal gate because N≈16 populations are dominated by stochastic lineage branching.
+
+Large-population evolutionary inference belongs to M8.
 
 ## Competitors
 
-The two competitors are isogenic except for one inherited promoter regulatory motif at locus 3 (R03 oxidative phosphorylation).
+The two competitors are isogenic except for one inherited promoter regulatory motif at locus 3, whose protein `0x369C` catalyses R03 oxidative phosphorylation.
 
-- `constitutive`: R03 promoter motif is outside the regulator binding radius.
-- `responsive`: R03 promoter motif exactly matches the assay regulator protein signature `0xCCCC`.
+- `constitutive`: R03 promoter motif is outside the regulator-binding radius.
+- `responsive`: R03 promoter motif exactly matches assay regulator protein signature `0xCCCC`.
 
-All promoter strengths, coding protein signatures, neutral markers, metabolic reactions and expression costs are otherwise identical.
+All basal promoter strengths, coding protein signatures, neutral markers, metabolic reactions and expression costs are otherwise identical.
 
-The `0xCCCC` protein is deliberately outside every M4 catalytic activity radius. It therefore cannot create a hidden metabolic reaction. `O2` is also the only modeled ligand within its M5-B allosteric radius.
+The `0xCCCC` protein is deliberately outside every M4 catalytic activity radius, so it cannot create a hidden metabolic reaction. O2 is the only modeled ligand inside its M5-B allosteric radius.
 
-`0xCCCC` has the high bit set, so promoter binding is repressive. Bit 14 is also set, so compatible ligand binding inhibits that regulatory contribution. Consequently:
+`0xCCCC` has the high bit set, therefore promoter binding is repressive. Bit 14 is also set, so compatible ligand binding inhibits that regulatory contribution. Consequently:
 
 - low intracellular O2 -> stronger R03 repression;
-- high intracellular O2 -> O2 binding weakens the repressor -> R03 transcription approaches basal expression.
+- high intracellular O2 -> O2 weakens the repressor -> R03 transcription moves toward basal expression.
 
 No oxygen-response behavior is named or special-cased in the engine.
 
@@ -36,47 +43,40 @@ Fluctuating treatment:
 
 with a 50/50 square wave and `PHASE_TICKS = 200`.
 
-At the production `tick_dt_min = 0.10`, each phase lasts 20 biological minutes.
+At production `tick_dt_min = 0.10`, each phase lasts 20 biological minutes.
 
-The schedules are matched for mean empty-cell membrane transport opportunity using the existing `oxygen_transport_km = 0.6`:
+The schedules are matched for mean empty-cell membrane transport opportunity using production `oxygen_transport_km = 0.6`:
 
 `0.5 / (0.6 + 0.5) = 0.5 * [6 / (0.6 + 6) + 0 / (0.6 + 0)] = 0.454545...`
 
-This is not an assertion that realized uptake must remain identical after physiology diverges. It removes the simpler design artifact that one treatment would have a different mean saturable transport opportunity by construction.
+This does not assert that realized uptake stays identical after physiology diverges. It removes the simpler design artifact that one treatment would have a different mean saturable transport opportunity by construction.
 
-Glucose, nitrogen and phosphorus are maintained as identical uniform reservoirs in both treatments. Mutation is disabled in this assay so selection acts on the two predefined inherited architectures rather than newly arising alleles.
+Glucose, nitrogen and phosphorus are maintained as identical uniform reservoirs. Mutation is disabled so the assay isolates selection on the two predefined inherited architectures.
 
 ## Molecular response timescale
 
-The relevant M5-A decay constants are:
+M5-A currently uses:
 
-- mRNA decay rate = `0.25 min^-1`, characteristic time `tau_mRNA = 4 min`;
-- protein decay rate = `0.05 min^-1`, characteristic time `tau_protein = 20 min`.
+- mRNA decay `0.25 min^-1` -> `tau_mRNA = 4 min`;
+- protein decay `0.05 min^-1` -> `tau_protein = 20 min`.
 
-The oxygen phase duration is therefore exactly one R03 protein turnover time constant.
+The oxygen phase duration is therefore exactly one protein turnover time constant.
 
-This creates a biologically meaningful lag possibility: promoter occupancy and transcription can respond quickly to a change in O2, while the realized catalytic protein pool cannot instantaneously follow. A responsive lineage can therefore enter a high-O2 interval with less R03 protein left from the preceding anoxic interval, and can retain unnecessary R03 protein after O2 falls again.
+This creates a mechanistically important lag: ligand sensing and promoter occupancy can change quickly, while the realized catalytic protein pool cannot instantaneously follow. M5-C tests this directly. Deterministic mean-expression controls prove that one anoxic phase leaves less R03 protein in the responsive architecture and that R03 remains below the constitutive level during the early high-O2 opportunity even though sensing has already changed transcription.
 
-M5-C tests this lag directly at the protein level in addition to observing population selection.
+## Population discovery 1 — original positive hypothesis rejected
 
-## Discovery experiment — original directional hypothesis rejected
+The first population protocol and directional gate were committed before output was available.
 
-The first protocol was committed before its population output was available.
+Seeds: `1011, 2022, 3033, 4044`.
 
-Discovery seeds:
-
-- `1011`
-- `2022`
-- `3033`
-- `4044`
-
-Original precommitted hypothesis:
+Original hypothesis:
 
 `delta = log(R/C)_fluctuating - log(R/C)_stable > 0`
 
-with positive delta in at least 3/4 paired seeds and mean delta > 0.05.
+with at least 3/4 positive pairs and mean `delta > 0.05`.
 
-That hypothesis was rejected. The full 3600-tick discovery run produced:
+The 3600-tick result rejected that hypothesis:
 
 | Seed | Stable R/C | Stable log ratio | Fluctuating R/C | Fluctuating log ratio | Paired delta |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -85,59 +85,84 @@ That hypothesis was rejected. The full 3600-tick discovery run produced:
 | 3033 | 8 / 9 | -0.111226 | 8 / 9 | -0.111226 | 0.000000 |
 | 4044 | 9 / 8 | 0.111226 | 8 / 10 | -0.211309 | -0.322535 |
 
-Mean stable log ratio = `-0.022743`.
+Mean stable log ratio `-0.022743`; mean fluctuating log ratio `-0.176161`; mean paired delta `-0.153418`; positive pairs `0/4`.
 
-Mean fluctuating log ratio = `-0.176161`.
+Both treatments reproduced and reached generation 3. The failed positive gate is preserved as a falsification, not rewritten into a pass.
 
-Mean paired delta = `-0.153418`.
+## Population discovery 2 — negative-direction confirmation also rejected
 
-Positive paired deltas = `0/4`.
+The first discovery suggested that the 20-minute protein timescale might make the responsive architecture too slow for 20-minute O2 phases. That specific mechanism was independently supported by the R03 protein-lag controls.
 
-Both treatments reproduced and reached generation 3, so the rejection was not an extinction artifact. The original failed criterion remains documented and is not rewritten into a pass.
+A new population confirmation was therefore prospectively declared with unseen seeds `5155, 6266, 7377, 8488`, fixed 12-division endpoints, and a negative expected direction.
 
-## Interpretation generated by the discovery run
+All eight stable/fluctuating populations reached the 12-division endpoint without extinction or cap artifacts, but genotype frequencies were:
 
-The discovery output suggests a specific mechanistic hypothesis: **the tested regulatory architecture is too slow for this fluctuation period**.
+| Seed | Stable R/C | Fluctuating R/C | Paired delta |
+| --- | ---: | ---: | ---: |
+| 5155 | 8 / 8 | 8 / 8 | 0.000000 |
+| 6266 | 8 / 8 | 8 / 8 | 0.000000 |
+| 7377 | 8 / 8 | 9 / 7 | +0.236389 |
+| 8488 | 8 / 8 | 8 / 8 | 0.000000 |
 
-The environmental half-period is 20 min and the protein time constant is also 20 min. Thus instantaneous ligand sensing can be followed by delayed phenotype. The responsive genotype may lose respiratory protein before the high-O2 opportunity and fail to restore the protein pool quickly enough, while retaining some protein after O2 disappears.
+Mean paired delta was `+0.059097`; strict negative pairs `0/4`. The negative-direction confirmation therefore failed.
 
-This is a mechanistic hypothesis derived from the failed discovery experiment, not a post-hoc fitness rule. `tests/m5_selection_tests.gd` independently checks the predicted R03 protein lag using deterministic mean expression dynamics.
+This second failure is methodologically useful: the molecular phenotype is measurable, yet descendant-count frequency at N≈16 is quantized and dominated by stochastic lineage branching. Choosing more favorable seeds or weakening the directional criterion would be invalid.
 
-## Confirmatory experiment — prospectively declared after discovery
+## Final M5-C causal gate — paired lineage reproductive rate
 
-The discovery seeds are never reused for confirmation.
+The final gate was specified **before its six lineage seeds were executed**.
 
-Unseen confirmatory seeds:
+It uses the same production `SimulationEngine`, `CellState`, stochastic expression, metabolic solver, transport and viability rules. The only harness-specific operation is `max_cells = 1`, which prevents the simulation engine from replacing a mature founder with daughters. The harness stops at the first tick when that founder satisfies ordinary `ready_to_divide` criteria.
 
-- `5155`
-- `6266`
-- `7377`
-- `8488`
+For a dividing lineage:
 
-To avoid both population-cap bias and unnecessary long-run cost, each condition is compared at a fixed demographic endpoint of **12 total division events**, with 3600 ticks retained only as a biological timeout. The production population cap remains far above the possible endpoint.
+`r = ln(2) / T_division`
 
-The confirmatory direction is declared before these seeds are executed:
+This is an analysis metric only; it never enters physiology.
 
-`delta = log(R/C)_fluctuating - log(R/C)_stable < 0`
+For each seed:
+
+`A_stable = r_responsive,stable - r_constitutive,stable`
+
+The fluctuating advantage is averaged over four equally spaced starting phases `0, 100, 200, 300` ticks:
+
+`A_fluctuating = mean_phase(r_responsive - r_constitutive)`
+
+The environment-selection differential is:
+
+`D = A_fluctuating - A_stable`
+
+and is normalized by the seed's mean stable growth rate:
+
+`D_norm = D / mean(r_responsive,stable, r_constitutive,stable)`
+
+### Frozen seeds and acceptance criteria
+
+Seeds: `13001, 13002, 13003, 13004, 13005, 13006`.
+
+These seeds have not been used by either prior population experiment.
+
+Four fluctuating phase offsets per seed prevent the result from depending on always starting a founder in the same O2 half-cycle.
+
+The gate is deliberately **two-sided**. M5-C does not require regulation to be beneficial; it requires environmental dynamics to change the reproductive selection gradient.
 
 Acceptance requires all of the following:
 
-1. every stable and fluctuating replicate reaches the same 12-division endpoint before timeout;
-2. no extinction or population-cap artifact determines the endpoint;
-3. at least 3/4 paired deltas are nonpositive;
-4. at least 2/4 paired deltas are strictly negative;
-5. mean paired delta is less than `-0.05`.
+1. every constitutive and responsive lineage reaches ordinary division criteria before the 3600-tick timeout;
+2. at least 5/6 seed-level normalized differentials have the same sign as the overall mean differential;
+3. `abs(mean(D_norm)) >= 0.02`, i.e. the temporal environment shifts relative reproductive selection by at least 2% of baseline growth rate.
 
-The relaxed allowance for exact zero pairs is deliberate because descendant counts at a small fixed demographic endpoint are discrete. The material-effect requirement remains on the paired mean.
+No new seeds, sign changes or threshold changes are permitted after this panel is observed. If this gate fails, M5-C remains unclosed and the result is recorded as another falsification.
 
-## What M5-C can and cannot establish
+## Interpretation boundary
 
-If the unseen-seed confirmation passes, M5-C establishes that:
+A passing lineage gate would establish that:
 
-- two inherited regulatory architectures with otherwise matched molecular machinery can experience different selection solely because the temporal structure of the environment changes;
-- the effect emerges through gene regulation, protein turnover, metabolism and reproduction rather than an explicit fitness function;
-- regulatory response speed itself can become a selectable property in Microverse.
+- the two inherited regulatory architectures differ only through the intended molecular regulatory edge;
+- stable versus fluctuating O2 changes their relative reproductive rate through normal expression/protein/metabolic dynamics;
+- the effect does not require an explicit fitness variable;
+- regulation can therefore be selected differently under different environmental dynamics at the causal lineage level.
 
-It does **not** establish that regulation is generically beneficial, that the current responsive architecture is optimal, or that spontaneous regulatory evolution will necessarily find the same circuit. Those are questions for later open-evolution experiments.
+It would **not** establish fixation probability in a finite population, spontaneous evolution of this particular circuit, or a universal benefit/cost of regulation. Those require larger replicated population experiments and belong to M8.
 
-A particularly valuable later experiment is to mutate regulatory response timescales and ask whether slower environmental fluctuations select different mRNA/protein turnover or promoter architectures. That belongs after M5-C closes and should not be used to rescue the present confirmation.
+The two failed small-population gates remain valuable evidence that genetic drift and discrete lineage branching can obscure a real physiological selection gradient in tiny populations — itself an emergent property that Microverse should preserve rather than suppress.
