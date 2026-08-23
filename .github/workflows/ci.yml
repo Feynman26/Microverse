@@ -99,4 +99,8 @@ jobs:
       - name: Validate M8 experiment runner and environment schedules
         run: godot --headless --path . --script tests/m8_runner_tests.gd
 
-      # Frozen M5-C reproductive panels remain research evidence, not CI gates.
+      - name: Validate compact M8 environment and analytics closure
+        run: godot --headless --path . --script tests/m8_completion_tests.gd
+
+      - name: Execute frozen M8 regulatory confirmation panel
+        run: godot --headless --path . --script tests/m8_regulatory_confirmation_tests.gd
