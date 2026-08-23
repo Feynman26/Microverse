@@ -39,6 +39,9 @@ jobs:
       - name: Run invariant suite
         run: godot --headless --path . --script tests/run_tests.gd
 
+      - name: Validate deterministic RNG stream locality
+        run: godot --headless --path . --script tests/rng_stream_tests.gd
+
       - name: Characterize M4 catalytic landscape
         run: godot --headless --path . --script tests/m4_landscape_tests.gd
 
@@ -50,3 +53,19 @@ jobs:
 
       - name: Validate M5-B regulation and sensing
         run: godot --headless --path . --script tests/m5_regulation_tests.gd
+
+      - name: Validate M5 finite proteome budget
+        run: godot --headless --path . --script tests/m5_proteome_tests.gd
+
+      - name: Validate M5 shared translation capacity
+        run: godot --headless --path . --script tests/m5_translation_capacity_tests.gd
+
+      - name: Preserve M5-C ROS circuit mechanics gate
+        run: godot --headless --path . --script tests/m5c_ros_circuit_tests.gd
+
+      - name: Validate M5-C expression-burden mechanics
+        run: godot --headless --path . --script tests/m5c_burden_mechanics_tests.gd
+
+      # Reproductive confirmation panels are intentionally not CI gates. Their
+      # frozen independent confirmations falsified the proposed M5-C effect and
+      # are retained as research evidence under docs/tests, not rewritten to pass.

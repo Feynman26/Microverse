@@ -88,19 +88,37 @@ static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, c
 			pd_by_signature[signature] = minf(protein_amount, float(rng.poisson(pd_lambda)))
 		protein_decay_proposals[locus_id] = pd_by_signature
 
+	# Ribosomes are a shared physical resource. Translation proposals are made
+	# from the common pre-step snapshot and then scaled proportionally, so gene
+	# iteration order cannot grant a locus preferential access to translation.
+	var proteome_capacity: float = (
+		float(config.proteome_capacity_reference_units)
+		* float(config.expression_reference_protein_count)
+	)
+	var translation_capacity: float = (
+		proteome_capacity
+		* float(config.translation_capacity_fraction_of_proteome_per_min)
+		* dt
+	)
+	var ribosome_scale: float = 1.0
+	if total_translation_events > translation_capacity and total_translation_events > 0.0:
+		ribosome_scale = translation_capacity / total_translation_events
+	var ribosome_limited_translation: float = total_translation_events * ribosome_scale
+
 	var tx_atp_demand: float = total_tx_events * float(config.transcription_atp_cost_per_event)
-	var tl_atp_demand: float = total_translation_events * float(config.translation_atp_cost_per_event)
+	var tl_atp_demand: float = ribosome_limited_translation * float(config.translation_atp_cost_per_event)
 	var total_atp_demand: float = tx_atp_demand + tl_atp_demand
 	var available_atp: float = maxf(0.0, float(pool_snapshot.get("ATP", 0.0)))
 	var atp_scale: float = 1.0 if total_atp_demand <= available_atp or total_atp_demand <= 0.0 else available_atp / total_atp_demand
 	var nuc_demand: float = total_tx_events * float(config.transcription_nuc_cost_per_event)
-	var aa_demand: float = total_translation_events * float(config.translation_aa_cost_per_event)
+	var aa_demand: float = ribosome_limited_translation * float(config.translation_aa_cost_per_event)
 	var available_nuc: float = maxf(0.0, float(pool_snapshot.get("NUC", 0.0)))
 	var available_aa: float = maxf(0.0, float(pool_snapshot.get("AA", 0.0)))
 	var nuc_scale: float = 1.0 if nuc_demand <= available_nuc or nuc_demand <= 0.0 else available_nuc / nuc_demand
 	var aa_scale: float = 1.0 if aa_demand <= available_aa or aa_demand <= 0.0 else available_aa / aa_demand
 	var tx_scale: float = minf(atp_scale, nuc_scale)
-	var translation_scale: float = minf(atp_scale, aa_scale)
+	var translation_resource_scale: float = minf(atp_scale, aa_scale)
+	var translation_scale: float = ribosome_scale * translation_resource_scale
 
 	var accepted_tx: float = 0.0
 	var accepted_translation: float = 0.0
@@ -152,6 +170,8 @@ static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, c
 		"atp_spent": synthesis_atp,
 		"tx_scale": tx_scale,
 		"translation_scale": translation_scale,
+		"translation_capacity": translation_capacity,
+		"ribosome_scale": ribosome_scale,
 		"regulation": regulation_factors
 	}
 
@@ -328,5 +348,7 @@ static func _empty_summary() -> Dictionary:
 		"atp_spent": 0.0,
 		"tx_scale": 1.0,
 		"translation_scale": 1.0,
+		"translation_capacity": 0.0,
+		"ribosome_scale": 1.0,
 		"regulation": {}
 	}

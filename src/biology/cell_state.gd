@@ -42,6 +42,11 @@ func initialize_molecular_state(config) -> void:
 	assert(genome != null, "Genome must exist before molecular initialization")
 	metabolites = MetabolicSolverScript.create_initial_pools(volume, config)
 	expression_state = ExpressionSystemScript.create_equilibrium_state(genome, config)
+	# The equilibrium constructor predates the finite M5-C proteome budget and
+	# expresses every locus independently. Normalize the initial condition into
+	# the physically admissible proteome without recycling: initialization is a
+	# state construction, not a biochemical degradation event.
+	_enforce_proteome_budget(config, false)
 	last_fluxes = {}
 	last_expression_summary = {}
 	_sync_volume_from_biomass(config)
@@ -62,6 +67,12 @@ func total_mrna() -> float:
 
 func total_protein() -> float:
 	return ExpressionSystemScript.total_protein(expression_state)
+
+func proteome_capacity(config) -> float:
+	return float(config.proteome_capacity_reference_units) * float(config.expression_reference_protein_count)
+
+func proteome_utilization(config) -> float:
+	return total_protein() / maxf(1e-12, proteome_capacity(config))
 
 func transport_requests(dt: float, world, config) -> Dictionary:
 	if not alive:
@@ -103,12 +114,50 @@ func step_intracellular(dt: float, config, reactions: Array, rng) -> void:
 	# ATP/material and changes the proteome; metabolism then reads that realized
 	# proteome. No promoter value enters catalytic flux directly.
 	last_expression_summary = ExpressionSystemScript.step(expression_state, genome, metabolites, dt, rng, config)
+	var proteome_summary: Dictionary = _enforce_proteome_budget(config, true)
+	for key in proteome_summary.keys():
+		last_expression_summary[key] = proteome_summary[key]
 	last_fluxes = MetabolicSolverScript.step(metabolites, genome, expression_state, reactions, dt, volume, config)
 	_sync_volume_from_biomass(config)
 	_pay_maintenance(dt, config)
 	_update_damage_and_repair(dt, config)
 	_check_viability(config)
 	_assert_state(config)
+
+# Generic finite proteome constraint. All realized protein cohorts compete for
+# the same physical budget; no locus, sequence or biological function is given
+# priority. If stochastic expression overshoots the budget, every cohort is
+# scaled by the same factor. Removed protein returns only its modeled amino-acid
+# material. ATP spent to synthesize it remains spent, so unnecessary expression
+# carries an energetic opportunity cost instead of being free.
+func _enforce_proteome_budget(config, recycle_excess: bool) -> Dictionary:
+	var capacity: float = proteome_capacity(config)
+	var before: float = total_protein()
+	var scale: float = 1.0
+	var removed: float = 0.0
+	if before > capacity and before > 0.0:
+		scale = capacity / before
+		var loci: Array = expression_state.keys()
+		loci.sort()
+		for locus_variant in loci:
+			var locus_id: int = int(locus_variant)
+			var cohorts: Dictionary = expression_state[locus_id]["protein"]
+			var signatures: Array = cohorts.keys()
+			signatures.sort()
+			for signature_variant in signatures:
+				var old_amount: float = maxf(0.0, float(cohorts[signature_variant]))
+				var new_amount: float = old_amount * scale
+				cohorts[signature_variant] = new_amount
+				removed += old_amount - new_amount
+	if recycle_excess and removed > 0.0:
+		metabolites["AA"] = float(metabolites.get("AA", 0.0)) + removed * float(config.translation_aa_cost_per_event)
+	return {
+		"proteome_capacity": capacity,
+		"proteome_before_constraint": before,
+		"proteome_removed": removed,
+		"proteome_scale": scale,
+		"proteome_utilization": total_protein() / maxf(1e-12, capacity)
+	}
 
 func _pay_maintenance(dt: float, config) -> void:
 	var required: float = float(config.maintenance_atp_rate_per_volume) * volume * dt
@@ -202,6 +251,7 @@ func _assert_state(config) -> void:
 	if genome != null:
 		genome.validate()
 	assert(total_mrna() >= -1e-10 and total_protein() >= -1e-10)
+	assert(total_protein() <= proteome_capacity(config) + 1e-8)
 
 func checksum() -> float:
 	var result: float = (
