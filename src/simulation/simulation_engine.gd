@@ -7,9 +7,13 @@ const WorldStateScript = preload("res://src/world/world_state.gd")
 const CellStateScript = preload("res://src/biology/cell_state.gd")
 const GenomeScript = preload("res://src/genetics/genome.gd")
 const MutationEngineScript = preload("res://src/genetics/mutation_engine.gd")
+const MetaboliteCatalogScript = preload("res://src/chemistry/metabolite_catalog.gd")
 const ReactionCatalogScript = preload("res://src/chemistry/reaction_catalog.gd")
 const CellMechanicsScript = preload("res://src/physics/cell_mechanics.gd")
 
+# M0-M6 basal membrane transport remains explicit and unchanged in M7-A. The
+# new secondary fields are physical substrates only until generic evolvable
+# transport machinery is added in the next M7 increment.
 const TRANSPORTED_RESOURCES: Array[String] = ["glucose", "oxygen", "nitrogen", "phosphorus"]
 
 var config
@@ -33,10 +37,26 @@ func _init(p_config = null) -> void:
 	reactions = ReactionCatalogScript.create_m4_candidate()
 	ReactionCatalogScript.validate_unique(reactions)
 	world = WorldStateScript.new(config.world_width, config.world_height, config.grid_cell_size_um)
+	_register_extracellular_fields()
+
+func _register_extracellular_fields() -> void:
+	# Preserve the historical field order for the four basal resources so old
+	# diagnostics remain easy to compare, then append every new field in sorted
+	# molecular-ID order for deterministic checksums/replay.
 	world.register_field("glucose", config.glucose_diffusion, config.initial_glucose)
 	world.register_field("oxygen", config.oxygen_diffusion, config.initial_oxygen)
 	world.register_field("nitrogen", config.nitrogen_diffusion, config.initial_nitrogen)
 	world.register_field("phosphorus", config.phosphorus_diffusion, config.initial_phosphorus)
+
+	for metabolite_id in MetaboliteCatalogScript.extracellular_ids():
+		var field_name: String = MetaboliteCatalogScript.extracellular_field(metabolite_id)
+		if world.has_field(field_name):
+			continue
+		world.register_field(
+			field_name,
+			config.extracellular_diffusion_coefficient(metabolite_id),
+			config.extracellular_initial_amount(metabolite_id)
+		)
 
 func seed_ancestor(position: Vector2 = Vector2(-1.0, -1.0)):
 	if position.x < 0.0 or position.y < 0.0:
@@ -121,13 +141,23 @@ func _process_deaths() -> void:
 			survivors.append(cell)
 			continue
 		var pools: Dictionary = cell.releasable_pools()
-		for resource in TRANSPORTED_RESOURCES:
-			world.release(resource, cell.position, float(pools.get(resource, 0.0)))
+		var released: Dictionary = {}
+		var field_names: Array = pools.keys()
+		field_names.sort()
+		for field_variant in field_names:
+			var field_name := String(field_variant)
+			assert(world.has_field(field_name), "Lysis target has no extracellular field: %s" % field_name)
+			var amount: float = maxf(0.0, float(pools[field_name]))
+			if amount <= 0.0:
+				continue
+			world.release(field_name, cell.position, amount)
+			released[field_name] = amount
 		_record_event("death", {
 			"cell_id": cell.id,
 			"generation": cell.generation,
 			"reason": cell.death_reason,
-			"genotype_fingerprint": cell.genome.fingerprint() if cell.genome != null else -1
+			"genotype_fingerprint": cell.genome.fingerprint() if cell.genome != null else -1,
+			"released_pools": released
 		})
 	cells = survivors
 
