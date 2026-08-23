@@ -140,7 +140,7 @@ func _process_deaths() -> void:
 		if cell.alive:
 			survivors.append(cell)
 			continue
-		var pools: Dictionary = cell.releasable_pools()
+		var pools: Dictionary = cell.releasable_pools(config)
 		var released: Dictionary = {}
 		var field_names: Array = pools.keys()
 		field_names.sort()
