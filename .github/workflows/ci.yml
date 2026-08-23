@@ -45,6 +45,9 @@ jobs:
       - name: Validate M10 replication fidelity and genome costs
         run: godot --headless --path . --script tests/m10_replication_fidelity_tests.gd
 
+      - name: Validate M10 cis-regulatory architecture
+        run: godot --headless --path . --script tests/m10_cis_architecture_tests.gd
+
       - name: Profile default visual-run longitudinal dynamics
         run: godot --headless --path . --script tests/m10_baseline_trace.gd
 
