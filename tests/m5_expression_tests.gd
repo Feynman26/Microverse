@@ -19,6 +19,7 @@ func _run() -> void:
 	_test_initial_proteome_matches_m4_scale()
 	_test_zero_proteome_means_zero_flux()
 	_test_expression_has_energy_and_material_cost()
+	_test_expression_turnover_conserves_structural_material()
 	_test_generic_activation_and_repression()
 	_test_expression_noise_is_seed_reproducible()
 	_test_expression_partition_conserves_state()
@@ -61,14 +62,28 @@ func _test_expression_has_energy_and_material_cost() -> void:
 	var pools: Dictionary = MetabolicSolverScript.create_initial_pools(1.0, config)
 	pools["ATP"] = 20.0; pools["ADP"] = 0.0; pools["AA"] = 10.0; pools["NUC"] = 10.0
 	var before_atp: float = float(pools["ATP"])
-	var before_aa: float = float(pools["AA"])
-	var before_nuc: float = float(pools["NUC"])
 	var rng = DeterministicRngScript.new(11)
 	var stats: Dictionary = ExpressionSolverScript.step(state, genome, pools, 0.1, rng, config)
 	_assert_true(float(stats["atp_cost"]) > 0.0, "gene expression consumes ATP")
 	_assert_true(float(pools["ATP"]) < before_atp and float(pools["ADP"]) > 0.0, "expression converts ATP to ADP")
-	_assert_true(float(pools["AA"]) < before_aa, "translation consumes amino precursor material")
-	_assert_true(float(pools["NUC"]) < before_nuc, "transcription consumes nucleotide precursor material")
+	_assert_true(float(stats["aa_committed"]) > 0.0, "translation commits amino precursor material to proteins")
+	_assert_true(float(stats["nuc_committed"]) > 0.0, "transcription commits nucleotide precursor material to mRNA")
+
+func _test_expression_turnover_conserves_structural_material() -> void:
+	var config = SimConfigScript.new()
+	config.regulation_enabled = false
+	config.expression_noise_fraction = 0.0
+	var genome = GenomeScript.create_ancestor()
+	var state = ExpressionSolverScript.initialize(genome, config)
+	var pools: Dictionary = MetabolicSolverScript.create_initial_pools(1.0, config)
+	pools["ATP"] = 20.0; pools["AA"] = 10.0; pools["NUC"] = 10.0
+	var before_met: Dictionary = MetabolicSolverScript.structural_totals(pools)
+	var before_expr: Dictionary = ExpressionSolverScript.structural_totals(state, config)
+	ExpressionSolverScript.step(state, genome, pools, 0.3, DeterministicRngScript.new(19), config)
+	var after_met: Dictionary = MetabolicSolverScript.structural_totals(pools)
+	var after_expr: Dictionary = ExpressionSolverScript.structural_totals(state, config)
+	for element in ["C", "N", "P"]:
+		_assert_close(float(before_met[element]) + float(before_expr[element]), float(after_met[element]) + float(after_expr[element]), 1e-9, "expression turnover conserves represented %s" % element)
 
 func _test_generic_activation_and_repression() -> void:
 	var config = SimConfigScript.new()
