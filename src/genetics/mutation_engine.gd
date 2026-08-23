@@ -7,7 +7,11 @@ const STRUCTURAL_OPERATIONS: Array[String] = [
 	"gene_duplication",
 	"gene_deletion",
 	"segment_inversion",
-	"local_rearrangement"
+	"local_rearrangement",
+	"promoter_region_duplication",
+	"promoter_region_deletion",
+	"regulatory_region_duplication",
+	"regulatory_region_deletion"
 ]
 
 # Historical M3 mutation harness. It remains intentionally unchanged so the
@@ -81,6 +85,10 @@ func apply_structural_mutation(genome, operation: String, rng) -> Dictionary:
 		"gene_deletion": return _delete_gene(genome, rng)
 		"segment_inversion": return _invert_segment(genome, rng)
 		"local_rearrangement": return _rearrange_local(genome, rng)
+		"promoter_region_duplication": return _change_region_copy(genome, rng, "promoter", 1)
+		"promoter_region_deletion": return _change_region_copy(genome, rng, "promoter", -1)
+		"regulatory_region_duplication": return _change_region_copy(genome, rng, "regulatory", 1)
+		"regulatory_region_deletion": return _change_region_copy(genome, rng, "regulatory", -1)
 	assert(false)
 	return {}
 
@@ -163,6 +171,36 @@ func _rearrange_local(genome, rng) -> Dictionary:
 		"second_index": second_index,
 		"before_loci": [first_locus, second_locus],
 		"after_loci": [second_locus, first_locus]
+	}
+
+func _change_region_copy(genome, rng, region: String, delta: int) -> Dictionary:
+	assert(region == "promoter" or region == "regulatory")
+	assert(delta == -1 or delta == 1)
+	var index: int = int(rng.randi_range(0, genome.genes.size() - 1))
+	var gene = genome.genes[index]
+	var old_value: int = int(gene.promoter_copy_number if region == "promoter" else gene.regulatory_copy_number)
+	var new_value: int = clampi(old_value + delta, 0, GeneScript.REGION_COPY_MAX)
+	var mutation_name: String = "%s_region_%s" % [region, "duplication" if delta > 0 else "deletion"]
+	if new_value == old_value:
+		return {
+			"mutation_type": mutation_name + "_blocked",
+			"locus_id": int(gene.locus_id),
+			"region": region,
+			"old_copy_number": old_value,
+			"new_copy_number": new_value,
+			"reason": "copy_number_bound"
+		}
+	if region == "promoter":
+		gene.promoter_copy_number = new_value
+	else:
+		gene.regulatory_copy_number = new_value
+	return {
+		"mutation_type": mutation_name,
+		"locus_id": int(gene.locus_id),
+		"region": region,
+		"old_copy_number": old_value,
+		"new_copy_number": new_value,
+		"replication_units_delta": float(delta) * float(genome.CIS_REGION_REPLICATION_UNITS)
 	}
 
 func _draw_unique_locus_id(genome, rng) -> int:
