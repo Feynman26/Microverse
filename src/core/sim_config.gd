@@ -59,6 +59,14 @@ var phosphorus_transport_vmax: float = 0.30
 var phosphorus_transport_km: float = 0.40
 var intracellular_pool_capacity_per_volume: float = 8.0
 
+# M7-B generic secondary membrane exchange. Activity comes from realized
+# proteins in the transport recognition landscape. The gradient determines the
+# direction, while every moved unit pays ATP and the transporter already pays
+# the finite-expression/proteome opportunity cost inherited from M5.
+var secondary_transport_vmax_per_reference_protein: float = 0.40
+var secondary_transport_gradient_km: float = 0.50
+var secondary_transport_atp_cost_per_unit: float = 0.02
+
 var metabolic_substeps_per_tick: int = 6
 var metabolic_km_per_volume: float = 0.20
 var metabolic_rate_scale: float = 0.85
@@ -172,6 +180,9 @@ func validate() -> void:
 		assert(diffusion * tick_dt_min / dx2 <= 0.25, "Unstable secondary extracellular diffusion: %s" % metabolite_id)
 	assert(glucose_transport_vmax >= 0.0 and oxygen_transport_vmax >= 0.0)
 	assert(nitrogen_transport_vmax >= 0.0 and phosphorus_transport_vmax >= 0.0)
+	assert(secondary_transport_vmax_per_reference_protein >= 0.0)
+	assert(secondary_transport_gradient_km > 0.0)
+	assert(secondary_transport_atp_cost_per_unit >= 0.0)
 	assert(metabolic_substeps_per_tick >= 1)
 	assert(metabolic_km_per_volume > 0.0 and metabolic_rate_scale > 0.0)
 	assert(biomass_units_per_volume > 0.0)
