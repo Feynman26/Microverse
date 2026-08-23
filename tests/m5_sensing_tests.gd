@@ -34,8 +34,6 @@ func _test_ancestor_is_outside_allosteric_radius() -> void:
 	var b = ExpressionSolverScript.initialize(genome, disabled)
 	var pools_a: Dictionary = MetabolicSolverScript.create_initial_pools(1.0, enabled)
 	var pools_b: Dictionary = pools_a.duplicate(true)
-	# Populate every ordinary intracellular pool. If any ancestral protein were
-	# accidentally within the active ligand radius, regulation would diverge.
 	for key in pools_a.keys():
 		if String(key) != "BIO":
 			pools_a[key] = maxf(1.0, float(pools_a[key]))
@@ -50,12 +48,7 @@ func _test_semantically_neutral_x_can_control_biomass_flux() -> void:
 	config.regulatory_gain = 1.0
 	config.allosteric_gain = 1.0
 	var genome = GenomeScript.create_ancestor()
-	# Turn locus 1 into an X-compatible generic regulator. X has signature 0x9696.
-	# High bit is set -> repressor; bit 14 is clear -> X binding potentiates it.
 	genome.get_gene_by_locus(1).protein_signature = 0x9696
-	# Locus 10 is the exact R12 structural-biomass catalyst (0xAF14). Make its
-	# promoter susceptible to the same regulator. Nothing in the engine knows
-	# that R12 means growth or that X is a signal.
 	genome.get_gene_by_locus(10).regulatory_signature = 0x9696
 
 	var low_state = ExpressionSolverScript.initialize(genome, config)
@@ -79,8 +72,6 @@ func _test_semantically_neutral_x_can_control_biomass_flux() -> void:
 
 	_assert_true(high_state.protein_for(10) < low_state.protein_for(10), "neutral X can become information by altering evolved regulator abundance effects")
 
-	# Compare catalytic consequence from identical precursor pools after the
-	# regulatory phase. Explicit proteomes are the only difference.
 	var reactions: Array = ReactionCatalogScript.create_m4_candidate()
 	var assay_low: Dictionary = MetabolicSolverScript.create_initial_pools(1.0, config)
 	var assay_high: Dictionary = assay_low.duplicate(true)
@@ -90,8 +81,8 @@ func _test_semantically_neutral_x_can_control_biomass_flux() -> void:
 		pools["AA"] = 10.0
 		pools["LIP"] = 5.0
 		pools["NUC"] = 10.0
-	var low_flux: Dictionary = MetabolicSolverScript.step(assay_low, genome, reactions, 0.5, 1.0, config, low_state.proteins)
-	var high_flux: Dictionary = MetabolicSolverScript.step(assay_high, genome, reactions, 0.5, 1.0, config, high_state.proteins)
+	var low_flux: Dictionary = MetabolicSolverScript.step(assay_low, genome, reactions, 0.5, 1.0, config, {}, low_state.protein_cohorts)
+	var high_flux: Dictionary = MetabolicSolverScript.step(assay_high, genome, reactions, 0.5, 1.0, config, {}, high_state.protein_cohorts)
 	_assert_true(float(high_flux["R12"]) < float(low_flux["R12"]), "information use propagates from ligand -> regulation -> protein -> biomass reaction flux")
 	_assert_true(float(assay_high["BIO"]) < float(assay_low["BIO"]), "the same genotype can produce environment-conditioned biomass outcome through generic molecular rules")
 
