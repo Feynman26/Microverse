@@ -8,12 +8,13 @@ const CellStateScript = preload("res://src/biology/cell_state.gd")
 const GenomeScript = preload("res://src/genetics/genome.gd")
 const MutationEngineScript = preload("res://src/genetics/mutation_engine.gd")
 const MetaboliteCatalogScript = preload("res://src/chemistry/metabolite_catalog.gd")
+const MetabolicSolverScript = preload("res://src/chemistry/metabolic_solver.gd")
 const ReactionCatalogScript = preload("res://src/chemistry/reaction_catalog.gd")
+const MembraneTransportScript = preload("res://src/transport/membrane_transport.gd")
 const CellMechanicsScript = preload("res://src/physics/cell_mechanics.gd")
 
-# M0-M6 basal membrane transport remains explicit and unchanged in M7-A. The
-# new secondary fields are physical substrates only until generic evolvable
-# transport machinery is added in the next M7 increment.
+# Historical basal uptake is preserved separately while M7 adds sequence-derived
+# exchange for the secondary extracellular chemistry.
 const TRANSPORTED_RESOURCES: Array[String] = ["glucose", "oxygen", "nitrogen", "phosphorus"]
 
 var config
@@ -28,6 +29,7 @@ var next_cell_id: int = 1
 var next_mutation_id: int = 1
 var event_log: Array = []
 var last_mechanics_summary: Dictionary = {}
+var last_secondary_transport_summary: Dictionary = {}
 
 func _init(p_config = null) -> void:
 	config = p_config if p_config != null else SimConfigScript.new()
@@ -83,6 +85,7 @@ func _step_once() -> void:
 	var dt: float = float(config.tick_dt_min)
 	world.diffuse(dt)
 	_allocate_membrane_transport(dt)
+	last_secondary_transport_summary = _allocate_secondary_membrane_transport(dt)
 
 	for cell in cells:
 		if cell.alive:
@@ -133,6 +136,147 @@ func _allocate_membrane_transport(dt: float) -> void:
 			var allocated: float = float(request.get(resource, 0.0)) * float(resource_scales.get(key, 1.0))
 			uptake[resource] = float(world.get_field(resource).remove_amount(key.x, key.y, allocated))
 		cell.apply_uptake(uptake)
+
+# M7-B generic secondary membrane transport. Every proposal is computed from a
+# common pre-exchange world/cell state. Positive exchange is import and negative
+# exchange is export. ATP scarcity scales all proposals from a given cell by the
+# same factor, while extracellular scarcity scales all importers at one lattice
+# site proportionally. Exports become available only after that allocation, so
+# a producer cannot feed a consumer instantaneously within the same transport
+# phase.
+func _allocate_secondary_membrane_transport(dt: float) -> Dictionary:
+	var records: Array = []
+	var import_totals: Dictionary = {}
+	for metabolite_id in config.SECONDARY_EXTRACELLULAR_IDS:
+		import_totals[metabolite_id] = {}
+
+	for cell in cells:
+		if not cell.alive:
+			continue
+		var key: Vector2i = _grid_key(cell.position)
+		var desired: Dictionary = {}
+		var activities: Dictionary = {}
+		for metabolite_id in config.SECONDARY_EXTRACELLULAR_IDS:
+			var field_name: String = MetaboliteCatalogScript.extracellular_field(metabolite_id)
+			var external_amount: float = maxf(0.0, float(world.get_field(field_name).get_value(key.x, key.y)))
+			var activity: float = MembraneTransportScript.proteome_activity(cell.expression_state, metabolite_id, config)
+			activities[metabolite_id] = activity
+			desired[metabolite_id] = MembraneTransportScript.desired_exchange(
+				cell.pool(metabolite_id),
+				cell.volume,
+				external_amount,
+				activity,
+				dt,
+				config
+			)
+
+		var energy_scale: float = MembraneTransportScript.energy_scale(desired, cell.pool("ATP"), config)
+		var proposed: Dictionary = {}
+		for metabolite_id in config.SECONDARY_EXTRACELLULAR_IDS:
+			var signed_amount: float = float(desired[metabolite_id]) * energy_scale
+			proposed[metabolite_id] = signed_amount
+			if signed_amount > 0.0:
+				var totals_by_key: Dictionary = import_totals[metabolite_id]
+				totals_by_key[key] = float(totals_by_key.get(key, 0.0)) + signed_amount
+				import_totals[metabolite_id] = totals_by_key
+		records.append({
+			"cell": cell,
+			"key": key,
+			"activities": activities,
+			"energy_scale": energy_scale,
+			"proposed": proposed
+		})
+
+	var import_scales: Dictionary = {}
+	for metabolite_id in config.SECONDARY_EXTRACELLULAR_IDS:
+		var field_name: String = MetaboliteCatalogScript.extracellular_field(metabolite_id)
+		var scales_by_key: Dictionary = {}
+		var totals_by_key: Dictionary = import_totals[metabolite_id]
+		for key_variant in totals_by_key.keys():
+			var key: Vector2i = key_variant
+			var requested: float = float(totals_by_key[key])
+			var available: float = maxf(0.0, float(world.get_field(field_name).get_value(key.x, key.y)))
+			scales_by_key[key] = 1.0 if requested <= available or requested <= 0.0 else available / requested
+		import_scales[metabolite_id] = scales_by_key
+
+	var world_imports: Dictionary = {}
+	var world_exports: Dictionary = {}
+	for metabolite_id in config.SECONDARY_EXTRACELLULAR_IDS:
+		world_imports[metabolite_id] = {}
+		world_exports[metabolite_id] = {}
+
+	for record in records:
+		var key: Vector2i = record["key"]
+		var proposed: Dictionary = record["proposed"]
+		var actual: Dictionary = {}
+		for metabolite_id in config.SECONDARY_EXTRACELLULAR_IDS:
+			var signed_amount: float = float(proposed[metabolite_id])
+			if signed_amount > 0.0:
+				var scale: float = float(import_scales[metabolite_id].get(key, 1.0))
+				var imported: float = signed_amount * scale
+				actual[metabolite_id] = imported
+				var imports_by_key: Dictionary = world_imports[metabolite_id]
+				imports_by_key[key] = float(imports_by_key.get(key, 0.0)) + imported
+				world_imports[metabolite_id] = imports_by_key
+			elif signed_amount < 0.0:
+				actual[metabolite_id] = signed_amount
+				var exports_by_key: Dictionary = world_exports[metabolite_id]
+				exports_by_key[key] = float(exports_by_key.get(key, 0.0)) + absf(signed_amount)
+				world_exports[metabolite_id] = exports_by_key
+			else:
+				actual[metabolite_id] = 0.0
+		record["actual"] = actual
+
+	# World deltas are applied in aggregate per field/lattice site, eliminating
+	# sequential first-come access from the authoritative resource update.
+	for metabolite_id in config.SECONDARY_EXTRACELLULAR_IDS:
+		var field_name: String = MetaboliteCatalogScript.extracellular_field(metabolite_id)
+		var field = world.get_field(field_name)
+		var imports_by_key: Dictionary = world_imports[metabolite_id]
+		for key_variant in imports_by_key.keys():
+			var key: Vector2i = key_variant
+			var requested_remove: float = float(imports_by_key[key])
+			var removed: float = float(field.remove_amount(key.x, key.y, requested_remove))
+			assert(absf(removed - requested_remove) <= 1e-9, "Secondary import allocation exceeded snapshot availability")
+		var exports_by_key: Dictionary = world_exports[metabolite_id]
+		for key_variant in exports_by_key.keys():
+			var key: Vector2i = key_variant
+			field.add_amount(key.x, key.y, float(exports_by_key[key]))
+
+	var by_cell: Dictionary = {}
+	var total_moved: float = 0.0
+	var total_atp_spent: float = 0.0
+	for record in records:
+		var cell = record["cell"]
+		var actual: Dictionary = record["actual"]
+		var moved: float = 0.0
+		var signed_actual: Dictionary = {}
+		for metabolite_id in config.SECONDARY_EXTRACELLULAR_IDS:
+			var signed_amount: float = float(actual[metabolite_id])
+			signed_actual[metabolite_id] = signed_amount
+			if signed_amount > 0.0:
+				MetabolicSolverScript.add_pool(cell.metabolites, metabolite_id, signed_amount)
+			elif signed_amount < 0.0:
+				cell.set_pool(metabolite_id, maxf(0.0, cell.pool(metabolite_id) + signed_amount))
+			moved += absf(signed_amount)
+		var cost: float = MembraneTransportScript.movement_cost(moved, config)
+		var spent: float = MetabolicSolverScript.spend_atp(cell.metabolites, cost)
+		assert(absf(spent - cost) <= 1e-9, "ATP pre-scaling failed to fund secondary transport")
+		total_moved += moved
+		total_atp_spent += spent
+		by_cell[int(cell.id)] = {
+			"exchange": signed_actual,
+			"activities": record["activities"],
+			"energy_scale": record["energy_scale"],
+			"moved": moved,
+			"atp_spent": spent
+		}
+
+	return {
+		"by_cell": by_cell,
+		"total_moved": total_moved,
+		"total_atp_spent": total_atp_spent
+	}
 
 func _process_deaths() -> void:
 	var survivors: Array = []
