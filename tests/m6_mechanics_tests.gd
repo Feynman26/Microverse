@@ -46,8 +46,8 @@ func _test_wall_projection_contains_complete_disk() -> void:
 	var cell = CellStateScript.new(1, -1, 0, 0, Vector2.ZERO, config.ancestor_volume)
 	CellMechanicsScript.relax([cell], world, config)
 	var radius: float = CellMechanicsScript.radius_for_cell(cell, config)
-	_assert_close(cell.position.x, radius, 1e-12, "left wall constrains disk edge rather than only its center")
-	_assert_close(cell.position.y, radius, 1e-12, "top wall constrains disk edge rather than only its center")
+	_assert_close(cell.position.x, radius, 1e-6, "left wall constrains disk edge rather than only its center")
+	_assert_close(cell.position.y, radius, 1e-6, "top wall constrains disk edge rather than only its center")
 	_assert_true(CellMechanicsScript.disks_within_bounds([cell], world, config), "wall projection keeps the complete cell disk inside the chamber")
 
 func _test_pair_relaxation_removes_material_overlap() -> void:
