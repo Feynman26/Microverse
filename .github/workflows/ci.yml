@@ -66,5 +66,6 @@ jobs:
       - name: Validate M5-C expression-burden mechanics
         run: godot --headless --path . --script tests/m5c_burden_mechanics_tests.gd
 
-      - name: Validate robust final M5-C environment-dependent reproductive outcome
-        run: godot --headless --path . --script tests/m5c_burden_robust_confirmation.gd
+      # Reproductive confirmation panels are intentionally not CI gates. Their
+      # frozen independent confirmations falsified the proposed M5-C effect and
+      # are retained as research evidence under docs/tests, not rewritten to pass.

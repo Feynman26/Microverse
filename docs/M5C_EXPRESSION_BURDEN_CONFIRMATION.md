@@ -1,10 +1,10 @@
-# M5-C final capability confirmation: regulated expression burden
+# M5-C expression-burden confirmation
 
-## Why this assay exists
+## Purpose
 
-Earlier M5-C experiments targeted endogenous R03 oxidative phosphorylation and R09 ROS control. Their molecular mechanisms worked, but independent reproductive panels showed weak or null genotype-by-environment effects. Those negative results are retained as falsifications; they are not reinterpreted as passes.
+Earlier M5-C experiments targeted endogenous R03 oxidative phosphorylation and R09 ROS control. Their molecular mechanisms worked, but independent reproductive panels showed weak or null genotype-by-environment effects. Those negative results are retained as falsifications.
 
-The M5 exit contract is narrower: demonstrate that generic inherited regulation can produce an environment-dependent reproductive outcome without explicit fitness. The final assay therefore isolates the selectable cost of gene expression itself rather than depending on the ecological leverage of one endogenous reaction.
+The final M5 capability assay isolated the selectable cost of gene expression itself rather than depending on the ecological leverage of one endogenous reaction.
 
 ## Architectures
 
@@ -13,7 +13,7 @@ Both genomes contain the same metabolic core, the same O2-compatible regulator, 
 - **constitutive:** the three burden promoters have dormant motifs and are not regulated by the O2-compatible repressor;
 - **responsive:** only the three burden regulatory motifs differ; they bind the O2-compatible repressor.
 
-No fitness term or genotype-specific cost exists. Both architectures pay ordinary ATP, AA/NUC, finite-proteome, and shared-ribosome costs. In high O2, allostery inhibits the repressor and the architectures should be approximately matched. During anoxia, the responsive architecture reduces neutral expression and can redirect ordinary cellular resources.
+No fitness term or genotype-specific cost exists. Both architectures pay ordinary ATP, AA/NUC, finite-proteome, and shared-ribosome costs. In high O2, allostery inhibits the repressor. During anoxia, the responsive architecture reduces neutral expression and can redirect ordinary cellular resources.
 
 ## Environment
 
@@ -23,41 +23,38 @@ No fitness term or genotype-specific cost exists. Both architectures pay ordinar
 - Four phase offsets are averaged per seed.
 - Mutation is disabled through the standard M5-C assay configuration.
 
-## First burden panel: informative but not confirmatory
+## First burden panel — failed predeclared gate
 
 Seeds `24001..24024` were frozen before their output was read. The panel produced:
 
 - mean `Dnorm = +0.102924`;
 - median `Dnorm ≈ +0.170776`;
 - 17/24 positive seed effects;
-- mean stable-high advantage `-0.00061652` native rate units.
+- mean stable-high advantage `-0.00061652` native rate units;
+- `t = 1.592926`, below the frozen `2.07` threshold.
 
-However, some fluctuating lineages did not reach division, so first-division outcomes contained genuine zero/censored reproductive rates and the distribution was strongly non-Gaussian (including a large negative tail). The predeclared one-sample t criterion therefore failed (`t = 1.592926`) even though the material-effect and sign criteria passed. The original panel remains a failed predeclared gate; its t threshold is not retroactively changed.
+Some fluctuating lineages did not reach division, producing genuine zero/censored reproductive rates and a strongly non-Gaussian distribution. The original panel therefore remained a failed gate; its t threshold was not changed after observation.
 
-This result motivates a separate robust confirmation rather than reinterpreting the first panel.
+## Final robust confirmation — independent falsification
 
-## Final robust confirmation — frozen before observation
+A second panel, seeds `25001..25024`, was frozen before observation. Failure to divide before death/timeout remained a zero reproductive rate and was not discarded.
 
-Seeds `25001..25024` are reserved for the final independent confirmation and have not been used by earlier M5-C panels.
+The predeclared robust criteria were stable-control validity, stable equivalence, mean and median `Dnorm >= 0.05`, and at least 17/24 positive seeds.
 
-For each seed, reproductive rate remains `ln(2) / first-division-time`. Failure to divide before death/timeout remains a zero reproductive rate; it is not discarded. The analysis-only response remains:
+Observed result:
 
-`Dnorm = [(R-C)_fluctuating - (R-C)_stable] / mean_baseline_growth_rate`
+- stable paired controls valid: `18/24`;
+- mean stable-high advantage: `+0.00012381` native rate units;
+- median `Dnorm = -0.096007`;
+- positive seeds: `8/24`;
+- fluctuating divisions: `122/192` trajectories.
 
-This value never enters physiology or reproduction.
+The reported arithmetic mean `Dnorm = +25,665,273.684331` is invalid as an effect summary. In seeds 25009 and 25023 the baseline reference rate approached zero, so normalization generated values near `-2.0e9` and `+2.7e9`. This demonstrates that the first-division normalized ratio is itself numerically unsuitable in regimes containing extinction/non-division.
 
-Because the first panel demonstrated that the response distribution is non-Gaussian/censored, the final confirmation uses robust location and sign criteria rather than a normal-theory t statistic.
+The robust confirmation therefore fails three of five criteria and, more importantly, reverses the sign prevalence observed in the first panel. The reproductive effect is **not independently confirmed**.
 
-All of the following are predeclared before reading any `25001..25024` output:
+## Final interpretation
 
-1. both architectures divide in every stable-high control seed;
-2. mean stable-high responsive-vs-constitutive growth-rate difference has absolute magnitude <= 0.03 native rate units;
-3. mean `Dnorm >= 0.05`;
-4. median `Dnorm >= 0.05`;
-5. at least 17/24 independent seeds have `Dnorm > 0`.
+The M5 molecular machinery remains validated: regulation can alter transcription, protein abundance, flux, and expression cost as a consequence of generic molecular interactions. What is not established is a reproducible reproductive advantage for the tested regulatory architectures under this M5-scale assay.
 
-For 24 untied Bernoulli signs under a 50/50 null, `P(X >= 17) ≈ 0.03196` one-sided. Requiring 17 positive seeds is therefore a predeclared exact sign-test-level criterion while remaining robust to the heavy-tailed magnitude distribution exposed by the first panel.
-
-## Interpretation boundary
-
-Passing this gate demonstrates a selectable consequence of generic environment-conditioned regulation and costly expression. It does **not** claim that the burden construct is an evolved natural adaptation or that a particular ecological strategy has emerged. The endogenous R03/R09 null results remain scientifically meaningful. Open-ended selection and ecological discovery remain later milestones, especially M7-M8.
+No further M5-C tuning or confirmation panels are planned. Population-level selection experiments are deferred to M8, where fixed-horizon counts, survival, lineage expansion, and competition frequencies can be analyzed without dividing by near-zero first-division rates.
