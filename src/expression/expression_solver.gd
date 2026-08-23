@@ -3,6 +3,7 @@ class_name ExpressionSolver
 
 const ExpressionStateScript = preload("res://src/expression/expression_state.gd")
 const CatalyticLandscapeScript = preload("res://src/chemistry/catalytic_landscape.gd")
+const MetaboliteCatalogScript = preload("res://src/chemistry/metabolite_catalog.gd")
 
 static func initialize(genome, config):
 	var mrna: Dictionary = {}
@@ -27,6 +28,7 @@ static func step(state, genome, metabolites: Dictionary, dt: float, rng, config)
 
 	var old_mrna: Dictionary = state.mrna.duplicate(true)
 	var old_proteins: Dictionary = state.proteins.duplicate(true)
+	var metabolic_snapshot: Dictionary = metabolites.duplicate(true)
 	var transcription_requests: Dictionary = {}
 	var translation_requests: Dictionary = {}
 	var regulation: Dictionary = {}
@@ -35,10 +37,6 @@ static func step(state, genome, metabolites: Dictionary, dt: float, rng, config)
 	var returned_nuc: float = 0.0
 	var returned_aa: float = 0.0
 
-	# Decay and synthesis requests are all derived from the same molecular
-	# snapshot. Material released by turnover during this interval is eligible
-	# for resynthesis during the same interval, but it is computed before any
-	# locus is updated so iteration order cannot confer a resource advantage.
 	for gene in genome.genes:
 		var locus_id: int = int(gene.locus_id)
 		var m_old: float = float(old_mrna.get(locus_id, 0.0))
@@ -50,7 +48,7 @@ static func step(state, genome, metabolites: Dictionary, dt: float, rng, config)
 		returned_nuc += m_deg * float(config.nuc_cost_per_mrna_unit)
 		returned_aa += p_deg * float(config.aa_cost_per_protein_unit)
 
-		var regulation_factor: float = _regulation_factor(gene, genome, old_proteins, config)
+		var regulation_factor: float = _regulation_factor(gene, genome, old_proteins, metabolic_snapshot, config)
 		regulation[locus_id] = regulation_factor
 		var transcription_noise: float = _noise_multiplier(rng, float(config.expression_noise_fraction))
 		var translation_noise: float = _noise_multiplier(rng, float(config.expression_noise_fraction))
@@ -62,9 +60,9 @@ static func step(state, genome, metabolites: Dictionary, dt: float, rng, config)
 	var requested_atp: float = total_transcription * float(config.transcription_atp_cost_per_unit) + total_translation * float(config.translation_atp_cost_per_unit)
 	var requested_nuc: float = total_transcription * float(config.nuc_cost_per_mrna_unit)
 	var requested_aa: float = total_translation * float(config.aa_cost_per_protein_unit)
-	var atp_scale: float = _availability_scale(float(metabolites.get("ATP", 0.0)), requested_atp)
-	var nuc_scale: float = _availability_scale(float(metabolites.get("NUC", 0.0)) + returned_nuc, requested_nuc)
-	var aa_scale: float = _availability_scale(float(metabolites.get("AA", 0.0)) + returned_aa, requested_aa)
+	var atp_scale: float = _availability_scale(float(metabolic_snapshot.get("ATP", 0.0)), requested_atp)
+	var nuc_scale: float = _availability_scale(float(metabolic_snapshot.get("NUC", 0.0)) + returned_nuc, requested_nuc)
+	var aa_scale: float = _availability_scale(float(metabolic_snapshot.get("AA", 0.0)) + returned_aa, requested_aa)
 	var transcription_scale: float = minf(atp_scale, nuc_scale)
 	var translation_scale: float = minf(atp_scale, aa_scale)
 
@@ -84,10 +82,10 @@ static func step(state, genome, metabolites: Dictionary, dt: float, rng, config)
 	var atp_spent: float = effective_transcription * float(config.transcription_atp_cost_per_unit) + effective_translation * float(config.translation_atp_cost_per_unit)
 	var nuc_committed: float = effective_transcription * float(config.nuc_cost_per_mrna_unit)
 	var aa_committed: float = effective_translation * float(config.aa_cost_per_protein_unit)
-	metabolites["ATP"] = maxf(0.0, float(metabolites.get("ATP", 0.0)) - atp_spent)
-	metabolites["ADP"] = float(metabolites.get("ADP", 0.0)) + atp_spent
-	metabolites["NUC"] = maxf(0.0, float(metabolites.get("NUC", 0.0)) + returned_nuc - nuc_committed)
-	metabolites["AA"] = maxf(0.0, float(metabolites.get("AA", 0.0)) + returned_aa - aa_committed)
+	metabolites["ATP"] = maxf(0.0, float(metabolic_snapshot.get("ATP", 0.0)) - atp_spent)
+	metabolites["ADP"] = float(metabolic_snapshot.get("ADP", 0.0)) + atp_spent
+	metabolites["NUC"] = maxf(0.0, float(metabolic_snapshot.get("NUC", 0.0)) + returned_nuc - nuc_committed)
+	metabolites["AA"] = maxf(0.0, float(metabolic_snapshot.get("AA", 0.0)) + returned_aa - aa_committed)
 	state.assert_nonnegative()
 	return {
 		"transcription": effective_transcription,
@@ -122,18 +120,11 @@ static func partition(state, ratio: float, rng, config) -> Array:
 	return [ExpressionStateScript.new(first_mrna, first_proteins), ExpressionStateScript.new(second_mrna, second_proteins)]
 
 static func structural_totals(state, config) -> Dictionary:
-	# The molecular state explicitly sequesters precursor material. These totals
-	# can be added to MetabolicSolver.structural_totals() to audit C/N/P across
-	# expression turnover as well as catalytic chemistry.
 	var mrna_material: float = state.total_mrna() * float(config.nuc_cost_per_mrna_unit)
 	var protein_material: float = state.total_protein() * float(config.aa_cost_per_protein_unit)
-	return {
-		"C": mrna_material * 2.0 + protein_material * 2.0,
-		"N": mrna_material + protein_material,
-		"P": mrna_material
-	}
+	return {"C": mrna_material * 2.0 + protein_material * 2.0, "N": mrna_material + protein_material, "P": mrna_material}
 
-static func _regulation_factor(target_gene, genome, protein_snapshot: Dictionary, config) -> float:
+static func _regulation_factor(target_gene, genome, protein_snapshot: Dictionary, metabolites: Dictionary, config) -> float:
 	if not bool(config.regulation_enabled):
 		return 1.0
 	var activator: float = 0.0
@@ -146,7 +137,8 @@ static func _regulation_factor(target_gene, genome, protein_snapshot: Dictionary
 		if distance > int(config.regulatory_max_distance):
 			continue
 		var affinity: float = exp(-float(config.regulatory_distance_decay) * float(distance))
-		var occupancy: float = abundance * affinity
+		var effective_abundance: float = abundance * _allosteric_factor(regulator_gene, metabolites, config)
+		var occupancy: float = effective_abundance * affinity
 		if (int(regulator_gene.protein_signature) & 0x8000) == 0:
 			activator += occupancy
 		else:
@@ -154,6 +146,31 @@ static func _regulation_factor(target_gene, genome, protein_snapshot: Dictionary
 	var total: float = activator + repressor
 	var normalized: float = (activator - repressor) / (1.0 + total)
 	return clampf(1.0 + float(config.regulatory_gain) * normalized, float(config.regulatory_min_factor), float(config.regulatory_max_factor))
+
+static func _allosteric_factor(regulator_gene, metabolites: Dictionary, config) -> float:
+	if not bool(config.allostery_enabled):
+		return 1.0
+	var strongest_occupancy: float = 0.0
+	var protein_signature: int = int(regulator_gene.protein_signature)
+	for metabolite_id in MetaboliteCatalogScript.ids():
+		var amount: float = maxf(0.0, float(metabolites.get(metabolite_id, 0.0)))
+		if amount <= 0.0:
+			continue
+		var distance: int = CatalyticLandscapeScript.hamming_distance(protein_signature, MetaboliteCatalogScript.ligand_signature(metabolite_id))
+		if distance > int(config.allosteric_max_distance):
+			continue
+		var affinity: float = exp(-float(config.allosteric_distance_decay) * float(distance))
+		var scaled_amount: float = amount * affinity
+		var km: float = float(config.allosteric_km_per_volume)
+		var occupancy: float = scaled_amount / (km + scaled_amount)
+		strongest_occupancy = maxf(strongest_occupancy, occupancy)
+	if strongest_occupancy <= 0.0:
+		return 1.0
+	var direction: float = -1.0 if (protein_signature & 0x4000) != 0 else 1.0
+	return clampf(
+		1.0 + direction * float(config.allosteric_gain) * strongest_occupancy,
+		float(config.allosteric_min_factor), float(config.allosteric_max_factor)
+	)
 
 static func _noise_multiplier(rng, fraction: float) -> float:
 	if fraction <= 0.0 or rng == null:
