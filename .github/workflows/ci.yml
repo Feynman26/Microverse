@@ -39,6 +39,9 @@ jobs:
       - name: Run invariant suite
         run: godot --headless --path . --script tests/run_tests.gd
 
+      - name: Validate deterministic RNG stream locality
+        run: godot --headless --path . --script tests/rng_stream_tests.gd
+
       - name: Characterize M4 catalytic landscape
         run: godot --headless --path . --script tests/m4_landscape_tests.gd
 
