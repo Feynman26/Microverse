@@ -4,6 +4,7 @@ class_name M5CGxeAssay
 const BaseExperiment = preload("res://src/experiments/m5c_regulatory_selection.gd")
 const SimulationEngineScript = preload("res://src/simulation/simulation_engine.gd")
 const CellStateScript = preload("res://src/biology/cell_state.gd")
+const ExpressionSystemScript = preload("res://src/expression/expression_system.gd")
 
 # Final M5-C assay: the production biology is unchanged. The experiment asks a
 # cleaner genotype-by-environment question than the earlier mean-transport-
@@ -128,7 +129,7 @@ static func run_panel(seeds: Array, max_ticks: int = MAX_TICKS) -> Dictionary:
 
 static func _current_r03(cell) -> float:
 	var gene = cell.genome.get_gene_by_locus(3)
-	return BaseExperiment.ExpressionSystemScript.current_gene_protein(cell.expression_state, gene)
+	return ExpressionSystemScript.current_gene_protein(cell.expression_state, gene)
 
 static func _maintain_environment(sim, oxygen_value: float) -> void:
 	_fill_field(sim.world.get_field("glucose"), BaseExperiment.GLUCOSE_RESERVOIR)
