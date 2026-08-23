@@ -48,6 +48,14 @@ var translation_atp_cost_per_event: float = 0.003
 var translation_aa_cost_per_event: float = 0.001
 var expression_partition_noise_scale: float = 0.12
 
+# M5-C finite proteome budget. The compressed cell can physically maintain only
+# this many reference-protein equivalents at once. Expression remains free to
+# propose any proteins, but excess realized protein is removed proportionally
+# and its amino-acid material is recycled. ATP already spent on unnecessary
+# synthesis is not refunded, creating a generic expression opportunity cost.
+# This is a global physical constraint, not a genotype-specific fitness trait.
+var proteome_capacity_reference_units: float = 5.0
+
 # M5-B generic promoter regulation. Any physical protein sequence cohort can
 # bind any promoter motif if its 16-bit signature is close enough. No gene is
 # tagged as a named transcription factor or behavior controller.
@@ -121,6 +129,7 @@ func validate() -> void:
 	assert(transcription_atp_cost_per_event >= 0.0 and transcription_nuc_cost_per_event >= 0.0)
 	assert(translation_atp_cost_per_event >= 0.0 and translation_aa_cost_per_event >= 0.0)
 	assert(expression_partition_noise_scale >= 0.0 and expression_partition_noise_scale < 0.5)
+	assert(proteome_capacity_reference_units > 0.0)
 	assert(regulatory_max_distance >= 0 and regulatory_max_distance <= 16)
 	assert(regulatory_distance_decay >= 0.0 and regulatory_gain >= 0.0)
 	assert(regulatory_min_factor >= 0.0 and regulatory_max_factor >= regulatory_min_factor)
