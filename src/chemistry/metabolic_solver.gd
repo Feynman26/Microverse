@@ -6,8 +6,7 @@ const MetaboliteCatalogScript = preload("res://src/chemistry/metabolite_catalog.
 
 static func create_initial_pools(volume: float, config) -> Dictionary:
 	var pools: Dictionary = {}
-	for metabolite_id in MetaboliteCatalogScript.ids():
-		pools[metabolite_id] = 0.0
+	for metabolite_id in MetaboliteCatalogScript.ids(): pools[metabolite_id] = 0.0
 	pools["BIO"] = volume * float(config.biomass_units_per_volume)
 	pools["ATP"] = float(config.initial_atp_per_volume) * volume
 	pools["ADP"] = float(config.initial_adp_per_volume) * volume
@@ -15,39 +14,55 @@ static func create_initial_pools(volume: float, config) -> Dictionary:
 	pools["NADH"] = float(config.initial_nadh_per_volume) * volume
 	return pools
 
-# protein_abundance is authoritative for M5 living cells. The empty-dictionary
-# fallback preserves M4 landscape/integration controls but must not be used by
-# CellState once expression has been initialized.
-static func step(pools: Dictionary, genome, reactions: Array, dt: float, volume: float, config, protein_abundance: Dictionary = {}) -> Dictionary:
+# Compatibility hierarchy:
+# - protein_cohorts: authoritative M5 molecular proteome preserving old protein identity;
+# - protein_abundance: M4/M5 controlled assays using current locus signature;
+# - neither: legacy M4 promoter-as-abundance characterization only.
+static func step(
+	pools: Dictionary,
+	genome,
+	reactions: Array,
+	dt: float,
+	volume: float,
+	config,
+	protein_abundance: Dictionary = {},
+	protein_cohorts: Dictionary = {}
+) -> Dictionary:
 	assert(genome != null)
 	assert(dt >= 0.0)
 	assert(volume > 0.0)
 	var cumulative_fluxes: Dictionary = {}
-	for reaction in reactions:
-		cumulative_fluxes[reaction.reaction_id] = 0.0
-	if dt <= 0.0:
-		return cumulative_fluxes
-
+	for reaction in reactions: cumulative_fluxes[reaction.reaction_id] = 0.0
+	if dt <= 0.0: return cumulative_fluxes
 	var substeps: int = maxi(1, int(config.metabolic_substeps_per_tick))
 	var sub_dt: float = dt / float(substeps)
 	for _substep in range(substeps):
-		var fluxes: Dictionary = _solve_substep(pools, genome, reactions, sub_dt, volume, config, protein_abundance)
-		for reaction_id in fluxes.keys():
-			cumulative_fluxes[reaction_id] = float(cumulative_fluxes[reaction_id]) + float(fluxes[reaction_id])
+		var fluxes: Dictionary = _solve_substep(pools, genome, reactions, sub_dt, volume, config, protein_abundance, protein_cohorts)
+		for reaction_id in fluxes.keys(): cumulative_fluxes[reaction_id] = float(cumulative_fluxes[reaction_id]) + float(fluxes[reaction_id])
 		assert_nonnegative(pools)
 	return cumulative_fluxes
 
-static func _solve_substep(pools: Dictionary, genome, reactions: Array, dt: float, volume: float, config, protein_abundance: Dictionary) -> Dictionary:
+static func _solve_substep(
+	pools: Dictionary,
+	genome,
+	reactions: Array,
+	dt: float,
+	volume: float,
+	config,
+	protein_abundance: Dictionary,
+	protein_cohorts: Dictionary
+) -> Dictionary:
 	var snapshot: Dictionary = pools.duplicate(true)
 	var potential_flux: Dictionary = {}
 	var substrate_demand: Dictionary = {}
-
 	for reaction in reactions:
-		var activity: float = (
-			CatalyticLandscapeScript.genome_activity(genome, reaction)
-			if protein_abundance.is_empty()
-			else CatalyticLandscapeScript.proteome_activity(genome, protein_abundance, reaction)
-		)
+		var activity: float
+		if not protein_cohorts.is_empty():
+			activity = CatalyticLandscapeScript.cohort_activity(protein_cohorts, reaction)
+		elif not protein_abundance.is_empty():
+			activity = CatalyticLandscapeScript.proteome_activity(genome, protein_abundance, reaction)
+		else:
+			activity = CatalyticLandscapeScript.genome_activity(genome, reaction)
 		var saturation: float = _limiting_saturation(snapshot, reaction.substrates, volume, float(config.metabolic_km_per_volume))
 		var capacity: float = activity * float(config.metabolic_rate_scale) * volume * dt
 		var requested_flux: float = maxf(0.0, capacity * saturation)
@@ -69,17 +84,14 @@ static func _solve_substep(pools: Dictionary, genome, reactions: Array, dt: floa
 		for metabolite_id in reaction.substrates.keys():
 			flux = minf(flux, float(potential_flux[reaction.reaction_id]) * float(substrate_scale.get(metabolite_id, 1.0)))
 		effective_flux[reaction.reaction_id] = flux
-		if flux <= 0.0:
-			continue
+		if flux <= 0.0: continue
 		for metabolite_id in reaction.substrates.keys():
 			deltas[metabolite_id] = float(deltas.get(metabolite_id, 0.0)) - flux * float(reaction.substrates[metabolite_id])
 		for metabolite_id in reaction.products.keys():
 			deltas[metabolite_id] = float(deltas.get(metabolite_id, 0.0)) + flux * float(reaction.products[metabolite_id])
-
 	for metabolite_id in deltas.keys():
 		pools[metabolite_id] = float(pools.get(metabolite_id, 0.0)) + float(deltas[metabolite_id])
-		if float(pools[metabolite_id]) < 0.0 and float(pools[metabolite_id]) > -1e-10:
-			pools[metabolite_id] = 0.0
+		if float(pools[metabolite_id]) < 0.0 and float(pools[metabolite_id]) > -1e-10: pools[metabolite_id] = 0.0
 	return effective_flux
 
 static func _limiting_saturation(snapshot: Dictionary, substrates: Dictionary, volume: float, km_per_volume: float) -> float:
@@ -120,8 +132,7 @@ static func structural_totals(pools: Dictionary) -> Dictionary:
 	for metabolite_id in MetaboliteCatalogScript.ids():
 		var amount: float = float(pools.get(metabolite_id, 0.0))
 		var units: Dictionary = MetaboliteCatalogScript.structural_units(metabolite_id)
-		for element in result.keys():
-			result[element] = float(result[element]) + amount * float(units[element])
+		for element in result.keys(): result[element] = float(result[element]) + amount * float(units[element])
 	return result
 
 static func assert_nonnegative(pools: Dictionary) -> void:
@@ -131,6 +142,5 @@ static func assert_nonnegative(pools: Dictionary) -> void:
 static func checksum(pools: Dictionary) -> float:
 	var ids: Array[String] = MetaboliteCatalogScript.ids()
 	var result: float = 0.0
-	for i in range(ids.size()):
-		result += float(pools.get(ids[i], 0.0)) * float((i + 3) * 17)
+	for i in range(ids.size()): result += float(pools.get(ids[i], 0.0)) * float((i + 3) * 17)
 	return result
