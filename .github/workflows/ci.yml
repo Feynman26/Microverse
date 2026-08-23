@@ -62,3 +62,6 @@ jobs:
 
       - name: Validate M5-C ROS circuit mechanics
         run: godot --headless --path . --script tests/m5c_ros_circuit_tests.gd
+
+      - name: Validate final M5-C reproductive success
+        run: godot --headless --path . --script tests/m5c_reproductive_success_confirmation.gd
