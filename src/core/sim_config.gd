@@ -36,10 +36,6 @@ var initial_adp_per_volume: float = 8.0
 var initial_nad_per_volume: float = 6.0
 var initial_nadh_per_volume: float = 1.0
 
-# M5 expression dynamics. Rates are per virtual minute in normalized molecular
-# abundance units. The chosen basal ratios make ancestral steady-state protein
-# abundance approximately equal to promoter strength, preserving continuity
-# with M4 while removing promoter-as-protein from authoritative physiology.
 var transcription_rate: float = 0.08
 var mrna_decay_rate: float = 0.20
 var translation_rate: float = 0.10
@@ -51,14 +47,26 @@ var aa_cost_per_protein_unit: float = 0.020
 var expression_noise_fraction: float = 0.05
 var expression_partition_jitter: float = 0.03
 
-# Generic protein -> promoter regulation. Protein high bit determines sign;
-# binding strength follows signature distance to the target regulatory motif.
 var regulation_enabled: bool = true
 var regulatory_max_distance: int = 3
 var regulatory_distance_decay: float = 0.80
 var regulatory_gain: float = 0.20
 var regulatory_min_factor: float = 0.50
 var regulatory_max_factor: float = 1.50
+
+# M5 chemical sensing is generic allostery, not a named sensor API. Any protein
+# whose signature is sufficiently close to any intracellular metabolite ligand
+# signature has its regulatory occupancy modulated by that molecule. Bit 14 of
+# the protein signature chooses potentiation versus inhibition. Default ligand
+# signatures are deliberately >2 bits from ancestral proteins, so this adds an
+# evolvable capability without silently rewriting the ancestral baseline.
+var allostery_enabled: bool = true
+var allosteric_max_distance: int = 2
+var allosteric_distance_decay: float = 0.90
+var allosteric_km_per_volume: float = 0.50
+var allosteric_gain: float = 0.75
+var allosteric_min_factor: float = 0.25
+var allosteric_max_factor: float = 2.00
 
 var maintenance_atp_rate_per_volume: float = 0.08
 var spontaneous_ros_decay_rate: float = 0.01
@@ -112,6 +120,9 @@ func validate() -> void:
 	assert(regulatory_max_distance >= 0 and regulatory_max_distance <= 16)
 	assert(regulatory_distance_decay >= 0.0 and regulatory_gain >= 0.0)
 	assert(regulatory_min_factor >= 0.0 and regulatory_max_factor >= regulatory_min_factor)
+	assert(allosteric_max_distance >= 0 and allosteric_max_distance <= 16)
+	assert(allosteric_distance_decay >= 0.0 and allosteric_km_per_volume > 0.0 and allosteric_gain >= 0.0)
+	assert(allosteric_min_factor >= 0.0 and allosteric_max_factor >= allosteric_min_factor)
 	assert(division_volume > ancestor_volume)
 	assert(partition_jitter >= 0.0 and partition_jitter < 0.5)
 	assert(promoter_mutation_rate_per_gene >= 0.0 and promoter_mutation_rate_per_gene <= 1.0)
