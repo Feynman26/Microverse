@@ -9,9 +9,7 @@ var grid_cell_size_um: float = 1.0
 var max_cells: int = 64
 var seed: int = 824718
 
-# Environment concentrations. M4 adds nitrogen and phosphorus because biomass
-# precursor synthesis now consumes them explicitly instead of hiding them in a
-# generic precursor scalar.
+# Environment concentrations.
 var initial_glucose: float = 4.0
 var initial_oxygen: float = 5.0
 var initial_nitrogen: float = 3.0
@@ -21,9 +19,9 @@ var oxygen_diffusion: float = 1.00
 var nitrogen_diffusion: float = 0.70
 var phosphorus_diffusion: float = 0.50
 
-# Transitional basal membrane transport. M4 makes intracellular metabolism
-# evolvable first; transport proteins become explicit molecular machinery in a
-# later gate. Resource allocation between competing cells remains simultaneous.
+# Transitional basal membrane transport. Intracellular catalytic capacity is
+# genome/proteome-derived from M4 onward; membrane transport becomes similarly
+# evolvable after the expression/regulation layer is stable.
 var glucose_transport_vmax: float = 0.60
 var glucose_transport_km: float = 0.80
 var oxygen_transport_vmax: float = 0.90
@@ -34,9 +32,7 @@ var phosphorus_transport_vmax: float = 0.30
 var phosphorus_transport_km: float = 0.40
 var intracellular_pool_capacity_per_volume: float = 8.0
 
-# M4 intracellular chemistry. Reactions are evaluated in order-independent
-# simultaneous substeps. Promoter code is a temporary constitutive abundance
-# proxy until M5 introduces explicit mRNA/protein kinetics.
+# M4 intracellular chemistry.
 var metabolic_substeps_per_tick: int = 6
 var metabolic_km_per_volume: float = 0.20
 var metabolic_rate_scale: float = 0.85
@@ -45,11 +41,28 @@ var initial_atp_per_volume: float = 2.0
 var initial_adp_per_volume: float = 8.0
 var initial_nad_per_volume: float = 6.0
 var initial_nadh_per_volume: float = 1.0
-var proteome_atp_cost_per_expression_unit_per_volume: float = 0.012
+
+# M5-A explicit expression kinetics. Values are compressed digital kinetics, not
+# quantitative bacterial copy-number claims. At basal steady state the chosen
+# rates give approximately `expression_reference_protein_count * promoter_strength`
+# proteins per locus, preserving the M4 phenotype scale while replacing the
+# shortcut with explicit state and stochastic turnover.
+var transcription_max_events_per_min: float = 1.0
+var mrna_decay_rate_per_min: float = 0.25
+var translation_events_per_mrna_per_min: float = 2.0
+var protein_decay_rate_per_min: float = 0.05
+var expression_reference_protein_count: float = 160.0
+
+# Expression resource costs per accepted molecular event. Material withdrawn
+# from NUC/AA is stored in mRNA/protein state and fully returned on degradation
+# in M5-A (compressed recycling). ATP is converted to ADP.
+var transcription_atp_cost_per_event: float = 0.010
+var transcription_nuc_cost_per_event: float = 0.002
+var translation_atp_cost_per_event: float = 0.003
+var translation_aa_cost_per_event: float = 0.001
+var expression_partition_noise_scale: float = 0.12
 
 # Basal physiology that is not yet part of the evolvable molecular grammar.
-# ATP spending always returns ADP to the pool. ROS itself is now produced and
-# detoxified by explicit M4 reactions; damage integrates the remaining burden.
 var maintenance_atp_rate_per_volume: float = 0.08
 var spontaneous_ros_decay_rate: float = 0.01
 var ros_damage_rate: float = 0.04
@@ -101,7 +114,14 @@ func validate() -> void:
 	assert(biomass_units_per_volume > 0.0)
 	assert(initial_atp_per_volume >= 0.0 and initial_adp_per_volume >= 0.0)
 	assert(initial_nad_per_volume >= 0.0 and initial_nadh_per_volume >= 0.0)
-	assert(proteome_atp_cost_per_expression_unit_per_volume >= 0.0)
+	assert(transcription_max_events_per_min >= 0.0)
+	assert(mrna_decay_rate_per_min > 0.0)
+	assert(translation_events_per_mrna_per_min >= 0.0)
+	assert(protein_decay_rate_per_min > 0.0)
+	assert(expression_reference_protein_count > 0.0)
+	assert(transcription_atp_cost_per_event >= 0.0 and transcription_nuc_cost_per_event >= 0.0)
+	assert(translation_atp_cost_per_event >= 0.0 and translation_aa_cost_per_event >= 0.0)
+	assert(expression_partition_noise_scale >= 0.0 and expression_partition_noise_scale < 0.5)
 	assert(division_volume > ancestor_volume)
 	assert(partition_jitter >= 0.0 and partition_jitter < 0.5)
 	assert(promoter_mutation_rate_per_gene >= 0.0 and promoter_mutation_rate_per_gene <= 1.0)
