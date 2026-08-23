@@ -4,6 +4,7 @@ class_name CellState
 const MetabolicSolverScript = preload("res://src/chemistry/metabolic_solver.gd")
 const MetaboliteCatalogScript = preload("res://src/chemistry/metabolite_catalog.gd")
 const ExpressionSystemScript = preload("res://src/expression/expression_system.gd")
+const DNAReplicationScript = preload("res://src/genetics/dna_replication.gd")
 
 var id: int
 var parent_id: int
@@ -20,9 +21,18 @@ var metabolites: Dictionary = {}
 var expression_state: Dictionary = {}
 var last_fluxes: Dictionary = {}
 var last_expression_summary: Dictionary = {}
+var last_replication_summary: Dictionary = {}
 var volume: float = 1.0
 var damage: float = 0.0
 var energy_debt: float = 0.0
+
+# M10 authoritative DNA-copying state. Progress is physical work completed on
+# the current cell cycle, not a fitness score. Daughters begin a new cycle at 0.
+var replication_progress: float = 0.0
+var replication_gene_equivalents_copied: float = 0.0
+var replication_atp_spent: float = 0.0
+var replication_nuc_spent: float = 0.0
+var replication_repair_activity_integral: float = 0.0
 
 func _init(
 	p_id: int = 0,
@@ -50,7 +60,15 @@ func initialize_molecular_state(config) -> void:
 	_enforce_proteome_budget(config, false)
 	last_fluxes = {}
 	last_expression_summary = {}
+	last_replication_summary = {}
 	_sync_volume_from_biomass(config)
+	_reset_replication_cycle()
+	# Controlled fixtures historically construct already division-sized cells.
+	# Such a constructed state represents a mother whose genome is already
+	# copied; ordinary simulations seed at ancestor_volume and must replicate.
+	if bool(config.evolvable_replication_enabled) and volume >= float(config.division_volume):
+		replication_gene_equivalents_copied = float(genome.gene_count())
+		replication_progress = 1.0
 
 # Compatibility alias for setup code introduced in M4.
 func initialize_metabolism(config) -> void:
@@ -125,6 +143,10 @@ func step_intracellular(dt: float, config, reactions: Array, rng) -> void:
 		last_expression_summary[key] = proteome_summary[key]
 	last_fluxes = MetabolicSolverScript.step(metabolites, genome, expression_state, reactions, dt, volume, config)
 	_sync_volume_from_biomass(config)
+	# DNA copying occurs after this tick's metabolism, so the replication fork
+	# pays from explicit ATP/NUC actually available in the cell. This cost then
+	# competes with maintenance and repair rather than being an abstract delay.
+	last_replication_summary = DNAReplicationScript.step(self, dt, config)
 	_pay_maintenance(dt, config)
 	_update_damage_and_repair(dt, config)
 	_check_viability(config)
@@ -200,7 +222,11 @@ func _check_viability(config) -> void:
 		death_reason = "energy_failure"
 
 func ready_to_divide(config) -> bool:
-	return alive and volume >= float(config.division_volume) and pool("ATP") >= float(config.division_atp_cost)
+	var replication_ready: bool = (
+		not bool(config.evolvable_replication_enabled)
+		or DNAReplicationScript.replication_complete(self)
+	)
+	return alive and replication_ready and volume >= float(config.division_volume) and pool("ATP") >= float(config.division_atp_cost)
 
 func create_daughters(first_id: int, second_id: int, tick: int, rng, world, config) -> Array:
 	assert(ready_to_divide(config))
@@ -230,9 +256,19 @@ func create_daughters(first_id: int, second_id: int, tick: int, rng, world, conf
 	second.genome = genome.deep_copy() if genome != null else null
 	first._sync_volume_from_biomass(config)
 	second._sync_volume_from_biomass(config)
+	# Daughter constructors already initialize a fresh replication cycle at zero;
+	# copied parental DNA has been partitioned into one inherited genome per cell.
 	alive = false
 	death_reason = "division"
 	return [first, second]
+
+func _reset_replication_cycle() -> void:
+	replication_progress = 0.0
+	replication_gene_equivalents_copied = 0.0
+	replication_atp_spent = 0.0
+	replication_nuc_spent = 0.0
+	replication_repair_activity_integral = 0.0
+	last_replication_summary = {}
 
 # Lysis exposes every metabolite that has a physical extracellular field. BIO
 # is not discarded: it is hydrolyzed into the exact precursor stoichiometry of
@@ -273,6 +309,10 @@ func _assert_state(config) -> void:
 	assert(volume > 0.0)
 	assert(damage >= -1e-10)
 	assert(energy_debt >= -1e-10)
+	assert(replication_progress >= -1e-10 and replication_progress <= 1.0 + 1e-10)
+	assert(replication_gene_equivalents_copied >= -1e-10)
+	assert(replication_atp_spent >= -1e-10 and replication_nuc_spent >= -1e-10)
+	assert(replication_repair_activity_integral >= -1e-10)
 	MetabolicSolverScript.assert_nonnegative(metabolites)
 	assert(absf(volume - pool("BIO") / float(config.biomass_units_per_volume)) <= 1e-10)
 	if genome != null:
@@ -288,6 +328,11 @@ func checksum() -> float:
 		+ volume * 7.0
 		+ damage * 29.0
 		+ energy_debt * 31.0
+		+ replication_progress * 43.0
+		+ replication_gene_equivalents_copied * 0.047
+		+ replication_atp_spent * 0.053
+		+ replication_nuc_spent * 0.059
+		+ replication_repair_activity_integral * 0.061
 		+ MetabolicSolverScript.checksum(metabolites) * 0.001
 		+ ExpressionSystemScript.checksum(expression_state) * 0.017
 	)
