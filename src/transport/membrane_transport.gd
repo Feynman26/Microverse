@@ -14,6 +14,10 @@ const TRANSPORT_DOMAIN_MASK: int = 0x4190
 const ACTIVE_MAX_DISTANCE: int = 4
 const DISTANCE_DECAY: float = 0.70
 
+# Pure molecular recognition cache. A key contains only protein and target
+# signatures; no concentration, resource, RNG or phenotype state is cached.
+static var _affinity_cache: Dictionary = {}
+
 static func hamming_distance(first_signature: int, second_signature: int) -> int:
 	var value: int = (first_signature ^ second_signature) & 0xFFFF
 	var distance: int = 0
@@ -27,10 +31,15 @@ static func target_signature(metabolite_id: String) -> int:
 	return (MetaboliteCatalogScript.ligand_signature(metabolite_id) ^ TRANSPORT_DOMAIN_MASK) & 0xFFFF
 
 static func affinity(protein_signature: int, metabolite_id: String) -> float:
-	var distance: int = hamming_distance(protein_signature, target_signature(metabolite_id))
-	if distance > ACTIVE_MAX_DISTANCE:
-		return 0.0
-	return exp(-DISTANCE_DECAY * float(distance))
+	var protein: int = protein_signature & 0xFFFF
+	var target: int = target_signature(metabolite_id)
+	var key: int = (protein << 16) | target
+	if _affinity_cache.has(key):
+		return float(_affinity_cache[key])
+	var distance: int = hamming_distance(protein, target)
+	var result: float = 0.0 if distance > ACTIVE_MAX_DISTANCE else exp(-DISTANCE_DECAY * float(distance))
+	_affinity_cache[key] = result
+	return result
 
 # Transport is a property of proteins that physically exist, not of DNA alone.
 # A coding mutation therefore changes transport only after expression builds a
