@@ -26,6 +26,24 @@ static func verify_replay(snapshot: Dictionary, target_tick: int, expected_check
 		"matches": absf(float(sim.checksum()) - expected_checksum) <= 1e-9
 	}
 
+# Select the latest persisted state that does not lie after the requested event.
+# This is a pure lookup over supplied snapshots; it never mutates or advances them.
+static func nearest_prior_snapshot(snapshots: Array, target_tick: int) -> Dictionary:
+	assert(target_tick >= 0)
+	var found: bool = false
+	var best_tick: int = -1
+	var best_snapshot: Dictionary = {}
+	for snapshot_variant in snapshots:
+		var snapshot: Dictionary = snapshot_variant
+		assert(snapshot.has("tick_index"))
+		var tick: int = int(snapshot["tick_index"])
+		if tick <= target_tick and (not found or tick > best_tick):
+			found = true
+			best_tick = tick
+			best_snapshot = snapshot
+	assert(found, "No snapshot exists at or before requested target tick")
+	return best_snapshot.duplicate(true)
+
 static func semantic_timeline(event_log: Array, from_tick: int = 0, to_tick: int = 2147483647) -> Array:
 	var result: Array = []
 	for event_variant in event_log:
@@ -60,18 +78,20 @@ static func run_competition(
 	var sim = SimulationEngineScript.new(config)
 	var founder_to_strain: Dictionary = {}
 	var founders_by_strain: Dictionary = {}
+	var descendants_by_founder: Dictionary = {}
 	var position_index: int = 0
 	for strain_index in range(strain_entries.size()):
 		var entry: Dictionary = strain_entries[strain_index]
 		var archive_id: String = String(entry["archive_id"])
 		founders_by_strain[archive_id] = []
-		for local_index in range(int(initial_counts[strain_index])):
+		for _local_index in range(int(initial_counts[strain_index])):
 			var position: Vector2 = _competition_position(config, position_index, requested_founders)
 			if position_index < positions.size():
 				position = positions[position_index]
 			var cell = _seed_entry(sim, entry, position)
 			founder_to_strain[int(cell.id)] = archive_id
 			founders_by_strain[archive_id].append(int(cell.id))
+			descendants_by_founder[int(cell.id)] = 0
 			position_index += 1
 	sim.relax_mechanics()
 	var initial_resources: Dictionary = _field_totals(sim)
@@ -102,6 +122,7 @@ static func run_competition(
 		if strain_id.is_empty():
 			continue
 		descendants[strain_id] = int(descendants[strain_id]) + 1
+		descendants_by_founder[root_id] = int(descendants_by_founder.get(root_id, 0)) + 1
 		var box: Dictionary = spatial[strain_id]
 		box["count"] = int(box["count"]) + 1
 		box["min_x"] = minf(float(box["min_x"]), float(cell.position.x))
@@ -156,6 +177,7 @@ static func run_competition(
 		"final_population": sim.population_size(),
 		"outcome": outcome,
 		"founders_by_strain": founders_by_strain,
+		"descendants_by_founder": descendants_by_founder,
 		"descendants_by_strain": descendants,
 		"frequencies": frequencies,
 		"division_events_by_strain": division_counts,
@@ -166,6 +188,35 @@ static func run_competition(
 		"final_resources": _field_totals(sim),
 		"final_checksum": float(sim.checksum()),
 		"timeline": semantic_timeline(sim.event_log)
+	}
+
+static func run_competition_batch(
+	base_config,
+	strain_entries: Array,
+	initial_counts: Array,
+	environment: Dictionary,
+	horizon_ticks: int,
+	seeds: Array,
+	positions: Array = []
+) -> Dictionary:
+	assert(not seeds.is_empty())
+	var runs: Array = []
+	var by_seed: Dictionary = {}
+	var outcome_counts: Dictionary = {"coexistence": 0, "fixation": 0, "extinction": 0}
+	for seed_variant in seeds:
+		var seed: int = int(seed_variant)
+		var result: Dictionary = run_competition(
+			base_config, strain_entries, initial_counts, environment, horizon_ticks, seed, positions
+		)
+		runs.append(result)
+		by_seed[seed] = result
+		var outcome: String = String(result["outcome"])
+		outcome_counts[outcome] = int(outcome_counts.get(outcome, 0)) + 1
+	return {
+		"seeds": seeds.duplicate(),
+		"runs": runs,
+		"by_seed": by_seed,
+		"outcome_counts": outcome_counts
 	}
 
 static func explain_genetic_candidate(reference_genome, candidate_genome, reference_phenotype: Dictionary = {}, candidate_phenotype: Dictionary = {}) -> Dictionary:
