@@ -34,18 +34,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not event is InputEventKey or not event.pressed or event.echo:
 		return
 	match event.keycode:
-		KEY_SPACE:
-			paused = not paused
-		KEY_1:
-			time_multiplier = 1.0
-		KEY_2:
-			time_multiplier = 10.0
-		KEY_3:
-			time_multiplier = 100.0
-		KEY_4:
-			time_multiplier = 1000.0
-		KEY_5:
-			time_multiplier = 5000.0
+		KEY_SPACE: paused = not paused
+		KEY_1: time_multiplier = 1.0
+		KEY_2: time_multiplier = 10.0
+		KEY_3: time_multiplier = 100.0
+		KEY_4: time_multiplier = 1000.0
+		KEY_5: time_multiplier = 5000.0
 
 func _draw() -> void:
 	_draw_glucose_field()
@@ -63,22 +57,19 @@ func _draw_glucose_field() -> void:
 
 func _draw_cells() -> void:
 	for cell in simulation.cells:
-		var cell_position: Vector2 = cell.position
-		var cell_volume: float = float(cell.volume)
-		var screen_position: Vector2 = WORLD_ORIGIN + cell_position * TILE_PX + Vector2(TILE_PX * 0.5, TILE_PX * 0.5)
-		var radius: float = maxf(2.5, sqrt(cell_volume) * 4.0)
+		var screen_position: Vector2 = WORLD_ORIGIN + cell.position * TILE_PX + Vector2(TILE_PX * 0.5, TILE_PX * 0.5)
+		var radius: float = maxf(2.5, sqrt(float(cell.volume)) * 4.0)
 		draw_circle(screen_position, radius, Color(0.88, 0.93, 0.96, 1.0))
 		draw_circle(screen_position, maxf(1.0, radius - 1.5), Color(0.16, 0.30, 0.34, 1.0))
 
 func _create_labels() -> void:
 	_status_label = Label.new()
 	_status_label.position = Vector2(555.0, 60.0)
-	_status_label.size = Vector2(360.0, 620.0)
+	_status_label.size = Vector2(380.0, 680.0)
 	add_child(_status_label)
-
 	_help_label = Label.new()
 	_help_label.position = Vector2(20.0, 15.0)
-	_help_label.text = "Microverse M4  |  SPACE pause  |  1: 1x  2: 10x  3: 100x  4: 1000x  5: 5000x"
+	_help_label.text = "Microverse M5  |  SPACE pause  |  1: 1x  2: 10x  3: 100x  4: 1000x  5: 5000x"
 	add_child(_help_label)
 
 func _update_status() -> void:
@@ -111,13 +102,20 @@ func _focal_cell_status() -> String:
 		return "Focal cell: none (extinction)\n"
 	var cell = simulation.cells[0]
 	var dominant: Dictionary = _dominant_flux(cell)
+	var mrna_total: float = cell.expression_state.total_mrna()
+	var protein_total: float = cell.expression_state.total_protein()
+	var cohort_count: int = cell.expression_state.cohort_records().size()
+	var expression_cost: float = float(cell.last_expression_stats.get("atp_cost", 0.0))
 	return (
 		"Focal cell #%d  gen %d\n" % [cell.id, cell.generation]
 		+ "  genotype: %d\n" % cell.genome.fingerprint()
 		+ "  volume/BIO: %.3f / %.3f\n" % [cell.volume, cell.pool("BIO")]
 		+ "  ATP/ADP: %.3f / %.3f\n" % [cell.pool("ATP"), cell.pool("ADP")]
+		+ "  mRNA/protein: %.3f / %.3f\n" % [mrna_total, protein_total]
+		+ "  protein cohorts: %d\n" % cohort_count
+		+ "  expression ATP/tick: %.5f\n" % expression_cost
 		+ "  G/C3/C2: %.3f / %.3f / %.3f\n" % [cell.pool("G"), cell.pool("C3"), cell.pool("C2")]
-		+ "  W1/W2: %.3f / %.3f\n" % [cell.pool("W1"), cell.pool("W2")]
+		+ "  W1/W2/X: %.3f / %.3f / %.3f\n" % [cell.pool("W1"), cell.pool("W2"), cell.pool("X")]
 		+ "  ROS/damage: %.3f / %.3f\n" % [cell.pool("ROS"), cell.damage]
 		+ "  dominant flux: %s %.5f\n\n" % [dominant["reaction_id"], dominant["flux"]]
 	)
