@@ -47,3 +47,6 @@ jobs:
 
       - name: Validate M5 expression and regulation
         run: godot --headless --path . --script tests/m5_expression_tests.gd
+
+      - name: Validate M5 sensing and information use
+        run: godot --headless --path . --script tests/m5_sensing_tests.gd
