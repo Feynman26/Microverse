@@ -30,7 +30,7 @@ func _run() -> void:
 	var reactions: Array = ReactionCatalogScript.create_m4_candidate()
 	var catalytic_total: float = 0.0
 	for reaction in reactions:
-		catalytic_total += CatalyticLandscapeScript.protein_reaction_affinity(Assay.NEUTRAL_BURDEN_SIGNATURE, int(reaction.signature))
+		catalytic_total += CatalyticLandscapeScript.affinity(Assay.NEUTRAL_BURDEN_SIGNATURE, int(reaction.signature))
 	_assert_close(catalytic_total, 0.0, 1e-12, "neutral burden protein has zero catalytic activity across M4")
 
 	var config = BaseExperiment.create_config(99173)
