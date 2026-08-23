@@ -5,20 +5,25 @@ const SimConfigScript = preload("res://src/core/sim_config.gd")
 const DeterministicRngScript = preload("res://src/core/deterministic_rng.gd")
 const WorldStateScript = preload("res://src/world/world_state.gd")
 const CellStateScript = preload("res://src/biology/cell_state.gd")
+const GenomeScript = preload("res://src/genetics/genome.gd")
+const MutationEngineScript = preload("res://src/genetics/mutation_engine.gd")
 
 var config
 var rng
 var world
+var mutation_engine
 var cells: Array = []
 var tick_index: int = 0
 var simulation_time_min: float = 0.0
 var next_cell_id: int = 1
+var next_mutation_id: int = 1
 var event_log: Array = []
 
 func _init(p_config = null) -> void:
 	config = p_config if p_config != null else SimConfigScript.new()
 	config.validate()
 	rng = DeterministicRngScript.new(config.seed)
+	mutation_engine = MutationEngineScript.new()
 	world = WorldStateScript.new(config.world_width, config.world_height, config.grid_cell_size_um)
 	world.register_field("glucose", config.glucose_diffusion, config.initial_glucose)
 	world.register_field("oxygen", config.oxygen_diffusion, config.initial_oxygen)
@@ -27,8 +32,14 @@ func seed_ancestor(position: Vector2 = Vector2(-1.0, -1.0)):
 	if position.x < 0.0 or position.y < 0.0:
 		position = Vector2(float(config.world_width - 1) * 0.5, float(config.world_height - 1) * 0.5)
 	var cell = CellStateScript.new(_allocate_cell_id(), -1, 0, tick_index, world.clamp_position(position), config.ancestor_volume)
+	cell.genome = GenomeScript.create_ancestor()
 	cells.append(cell)
-	_record_event("birth", {"cell_id": cell.id, "parent_id": -1, "generation": 0})
+	_record_event("birth", {
+		"cell_id": cell.id,
+		"parent_id": -1,
+		"generation": 0,
+		"genotype_fingerprint": cell.genome.fingerprint()
+	})
 	return cell
 
 func step(tick_count: int = 1) -> void:
@@ -51,12 +62,6 @@ func _step_once() -> void:
 	tick_index += 1
 	simulation_time_min += dt
 
-# Resource allocation deliberately has three distinct phases:
-# 1) all cells request from one immutable post-diffusion snapshot;
-# 2) one scale factor is computed per grid site and chemical from that snapshot;
-# 3) the precomputed allocations are applied.
-# Recomputing the scale after each removal would make later records receive less
-# solely because of iteration order, an artificial selective advantage.
 func _allocate_membrane_transport(dt: float) -> void:
 	var records: Array = []
 	var glucose_totals: Dictionary = {}
@@ -106,7 +111,8 @@ func _process_deaths() -> void:
 		_record_event("death", {
 			"cell_id": cell.id,
 			"generation": cell.generation,
-			"reason": cell.death_reason
+			"reason": cell.death_reason,
+			"genotype_fingerprint": cell.genome.fingerprint() if cell.genome != null else -1
 		})
 	cells = survivors
 
@@ -122,15 +128,31 @@ func _process_divisions() -> void:
 			projected_population += 1
 			_record_event("division", {
 				"parent_id": cell.id,
+				"parent_genotype_fingerprint": cell.genome.fingerprint() if cell.genome != null else -1,
 				"daughter_ids": [daughters[0].id, daughters[1].id],
 				"generation": cell.generation + 1
 			})
+
 			for daughter in daughters:
+				var parent_fingerprint: int = int(cell.genome.fingerprint())
+				var mutation_result: Dictionary = mutation_engine.mutate_copy(daughter.genome, rng, config)
+				daughter.genome = mutation_result["genome"]
+				var daughter_fingerprint: int = int(daughter.genome.fingerprint())
 				_record_event("birth", {
 					"cell_id": daughter.id,
 					"parent_id": cell.id,
-					"generation": daughter.generation
+					"generation": daughter.generation,
+					"genotype_fingerprint": daughter_fingerprint
 				})
+				for raw_event in mutation_result["events"]:
+					var mutation_payload: Dictionary = raw_event.duplicate(true)
+					mutation_payload["mutation_id"] = _allocate_mutation_id()
+					mutation_payload["cell_id"] = daughter.id
+					mutation_payload["parent_id"] = cell.id
+					mutation_payload["generation"] = daughter.generation
+					mutation_payload["parent_genotype_fingerprint"] = parent_fingerprint
+					mutation_payload["resulting_genotype_fingerprint"] = daughter_fingerprint
+					_record_event("mutation", mutation_payload)
 			next_population.append_array(daughters)
 		else:
 			next_population.append(cell)
@@ -146,6 +168,11 @@ func _grid_key(position: Vector2) -> Vector2i:
 func _allocate_cell_id() -> int:
 	var result: int = next_cell_id
 	next_cell_id += 1
+	return result
+
+func _allocate_mutation_id() -> int:
+	var result: int = next_mutation_id
+	next_mutation_id += 1
 	return result
 
 func _record_event(kind: String, payload: Dictionary) -> void:
@@ -170,9 +197,24 @@ func total_cell_volume() -> float:
 		result += float(cell.volume)
 	return result
 
+func mutation_event_count() -> int:
+	var result: int = 0
+	for event in event_log:
+		if event["kind"] == "mutation":
+			result += 1
+	return result
+
+func genotype_count() -> int:
+	var genotypes: Dictionary = {}
+	for cell in cells:
+		if cell.genome != null:
+			genotypes[cell.genome.canonical_key()] = true
+	return genotypes.size()
+
 func checksum() -> float:
 	var result: float = float(world.checksum()) + float(tick_index) * 37.0 + simulation_time_min * 41.0
 	for cell in cells:
 		result += float(cell.checksum())
 	result += float(rng.get_state() % 1000003) * 1e-6
+	result += float(next_cell_id) * 0.00017 + float(next_mutation_id) * 0.00019
 	return result

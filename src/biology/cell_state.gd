@@ -6,6 +6,7 @@ var parent_id: int
 var generation: int
 var birth_tick: int
 var position: Vector2
+var genome = null
 
 var alive: bool = true
 var death_reason: String = ""
@@ -19,7 +20,8 @@ var ros: float = 0.0
 var damage: float = 0.0
 var energy_debt: float = 0.0
 
-# M0-M2 ancestral traits. These become genome/proteome-derived values in M3+.
+# Transitional M0-M3 physiological scaffolding. M4/M5 replace these direct
+# phenotype scales with protein abundance/affinity derived from the genome.
 var glucose_transport_scale: float = 1.0
 var oxygen_transport_scale: float = 1.0
 var respiration_scale: float = 1.0
@@ -34,9 +36,6 @@ func _init(p_id: int = 0, p_parent_id: int = -1, p_generation: int = 0, p_birth_
 	position = p_position
 	volume = p_volume
 
-# Transport is split into request/allocation/application phases by the engine.
-# That avoids a hidden fitness advantage for whichever cell happens to be
-# iterated first when several cells compete for the same finite grid resource.
 func transport_requests(dt: float, world, config) -> Dictionary:
 	if not alive:
 		return {"glucose": 0.0, "oxygen": 0.0}
@@ -150,6 +149,8 @@ func create_daughters(first_id: int, second_id: int, tick: int, rng, world, conf
 	_copy_partitioned_state(second, 1.0 - ratio)
 	_copy_traits(first)
 	_copy_traits(second)
+	_copy_genome(first)
+	_copy_genome(second)
 	alive = false
 	death_reason = "division"
 	return [first, second]
@@ -170,6 +171,9 @@ func _copy_traits(child) -> void:
 	child.growth_scale = growth_scale
 	child.repair_scale = repair_scale
 
+func _copy_genome(child) -> void:
+	child.genome = genome.deep_copy() if genome != null else null
+
 func releasable_pools() -> Dictionary:
 	return {
 		"glucose": maxf(0.0, internal_glucose),
@@ -185,9 +189,11 @@ func _assert_state() -> void:
 	assert(ros >= -1e-10)
 	assert(damage >= -1e-10)
 	assert(energy_debt >= -1e-10)
+	if genome != null:
+		genome.validate()
 
 func checksum() -> float:
-	return (
+	var result: float = (
 		float(id) * 0.001
 		+ position.x * 3.0
 		+ position.y * 5.0
@@ -200,3 +206,6 @@ func checksum() -> float:
 		+ damage * 29.0
 		+ energy_debt * 31.0
 	)
+	if genome != null:
+		result += float(genome.checksum()) * 0.013
+	return result
