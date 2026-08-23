@@ -72,13 +72,13 @@ func _draw_cells() -> void:
 
 func _create_labels() -> void:
 	_status_label = Label.new()
-	_status_label.position = Vector2(555.0, 60.0)
-	_status_label.size = Vector2(360.0, 620.0)
+	_status_label.position = Vector2(555.0, 45.0)
+	_status_label.size = Vector2(390.0, 690.0)
 	add_child(_status_label)
 
 	_help_label = Label.new()
 	_help_label.position = Vector2(20.0, 15.0)
-	_help_label.text = "Microverse M4  |  SPACE pause  |  1: 1x  2: 10x  3: 100x  4: 1000x  5: 5000x"
+	_help_label.text = "Microverse M5-A  |  SPACE pause  |  1: 1x  2: 10x  3: 100x  4: 1000x  5: 5000x"
 	add_child(_help_label)
 
 func _update_status() -> void:
@@ -111,6 +111,11 @@ func _focal_cell_status() -> String:
 		return "Focal cell: none (extinction)\n"
 	var cell = simulation.cells[0]
 	var dominant: Dictionary = _dominant_flux(cell)
+	var expression: Dictionary = cell.last_expression_summary
+	var transcribed: float = float(expression.get("transcribed", 0.0))
+	var translated: float = float(expression.get("translated", 0.0))
+	var expression_atp: float = float(expression.get("atp_spent", 0.0))
+	var cohort_count: int = _protein_cohort_count(cell)
 	return (
 		"Focal cell #%d  gen %d\n" % [cell.id, cell.generation]
 		+ "  genotype: %d\n" % cell.genome.fingerprint()
@@ -119,8 +124,18 @@ func _focal_cell_status() -> String:
 		+ "  G/C3/C2: %.3f / %.3f / %.3f\n" % [cell.pool("G"), cell.pool("C3"), cell.pool("C2")]
 		+ "  W1/W2: %.3f / %.3f\n" % [cell.pool("W1"), cell.pool("W2")]
 		+ "  ROS/damage: %.3f / %.3f\n" % [cell.pool("ROS"), cell.damage]
+		+ "  mRNA/protein: %.2f / %.2f\n" % [cell.total_mrna(), cell.total_protein()]
+		+ "  protein cohorts: %d\n" % cohort_count
+		+ "  this tick tx/tl: %.2f / %.2f\n" % [transcribed, translated]
+		+ "  expression ATP: %.4f\n" % expression_atp
 		+ "  dominant flux: %s %.5f\n\n" % [dominant["reaction_id"], dominant["flux"]]
 	)
+
+func _protein_cohort_count(cell) -> int:
+	var count: int = 0
+	for locus_state in cell.expression_state.values():
+		count += locus_state["protein"].size()
+	return count
 
 func _dominant_flux(cell) -> Dictionary:
 	var best_id: String = "none"

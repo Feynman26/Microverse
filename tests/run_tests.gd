@@ -8,7 +8,7 @@ const CellStateScript = preload("res://src/biology/cell_state.gd")
 const GenomeScript = preload("res://src/genetics/genome.gd")
 const MutationEngineScript = preload("res://src/genetics/mutation_engine.gd")
 const ReactionCatalogScript = preload("res://src/chemistry/reaction_catalog.gd")
-const MetabolicSolverScript = preload("res://src/chemistry/metabolic_solver.gd")
+const ExpressionSystemScript = preload("res://src/expression/expression_system.gd")
 const SimulationEngineScript = preload("res://src/simulation/simulation_engine.gd")
 const MainUiScript = preload("res://src/ui/main.gd")
 
@@ -21,8 +21,8 @@ func _init() -> void:
 func _run() -> void:
 	_assert_true(MainUiScript != null, "main UI script parses")
 	_test_diffusion_conserves_mass_and_nonnegativity()
-	_test_competing_identical_cells_are_order_fair()
-	_test_division_conserves_metabolite_pools()
+	_test_competing_identical_cells_are_transport_order_fair()
+	_test_division_conserves_metabolites_and_expression_amounts()
 	_test_ancestor_genome_is_stable_and_copyable()
 	_test_mutation_disabled_inheritance_is_deep_copy()
 	_test_forced_mutations_change_only_child_genotype()
@@ -32,7 +32,7 @@ func _run() -> void:
 	_test_simulation_records_mutation_ancestry()
 	_test_cell_grows_and_divides_with_resources()
 	_test_cell_dies_without_energy_source()
-	_test_same_seed_reproduces_same_history()
+	_test_same_seed_reproduces_same_history_including_expression_noise()
 
 	if failures == 0:
 		print("PASS: %d Microverse tests" % tests_run)
@@ -50,7 +50,7 @@ func _test_diffusion_conserves_mass_and_nonnegativity() -> void:
 	_assert_close(field.total_amount(), before, 1e-9, "diffusion conserves closed-chamber mass")
 	_assert_true(field.minimum_value() >= 0.0, "diffusion remains nonnegative")
 
-func _test_competing_identical_cells_are_order_fair() -> void:
+func _test_competing_identical_cells_are_transport_order_fair() -> void:
 	var config = SimConfigScript.new()
 	config.world_width = 8
 	config.world_height = 8
@@ -60,21 +60,22 @@ func _test_competing_identical_cells_are_order_fair() -> void:
 	config.nitrogen_diffusion = 0.0
 	config.phosphorus_diffusion = 0.0
 	config.glucose_transport_vmax = 10.0
+	config.metabolic_rate_scale = 1e-12
 	var sim = SimulationEngineScript.new(config)
 	var position: Vector2 = Vector2(4.0, 4.0)
 	var first = sim.seed_ancestor(position)
 	var second = sim.seed_ancestor(position)
 	sim.step(1)
-	_assert_close(first.pool("G"), second.pool("G"), 1e-12, "identical competitors retain equal carbon state after scarce-resource tick")
+	_assert_close(first.pool("G"), second.pool("G"), 1e-10, "identical competitors receive equal scarce carbon before material metabolic consumption")
 	_assert_true(sim.world.get_field("glucose").get_value(4, 4) <= 1e-12, "scarce local glucose is exhausted by proportional allocation")
 
-func _test_division_conserves_metabolite_pools() -> void:
+func _test_division_conserves_metabolites_and_expression_amounts() -> void:
 	var config = SimConfigScript.new()
 	var rng = DeterministicRngScript.new(12345)
 	var world = WorldStateScript.new(8, 8, 1.0)
 	var parent = CellStateScript.new(1, -1, 0, 0, Vector2(4.0, 4.0), config.division_volume)
 	parent.genome = GenomeScript.create_ancestor()
-	parent.initialize_metabolism(config)
+	parent.initialize_molecular_state(config)
 	parent.set_pool("BIO", config.division_volume * config.biomass_units_per_volume)
 	parent.volume = config.division_volume
 	parent.set_pool("G", 1.2)
@@ -85,19 +86,22 @@ func _test_division_conserves_metabolite_pools() -> void:
 	parent.set_pool("NADH", 1.0)
 	parent.damage = 0.2
 	parent.energy_debt = 0.1
-
-	var before: Dictionary = parent.metabolites.duplicate(true)
+	var metabolite_before: Dictionary = parent.metabolites.duplicate(true)
+	var mrna_before: float = parent.total_mrna()
+	var protein_before: float = parent.total_protein()
 	var daughters: Array = parent.create_daughters(2, 3, 7, rng, world, config)
 	var a = daughters[0]
 	var b = daughters[1]
 	_assert_close(a.volume + b.volume, config.division_volume, 1e-12, "division conserves structural cell volume")
-	for metabolite_id in before.keys():
-		var expected: float = float(before[metabolite_id])
+	for metabolite_id in metabolite_before.keys():
+		var expected: float = float(metabolite_before[metabolite_id])
 		if String(metabolite_id) == "ATP":
 			expected -= config.division_atp_cost
 		elif String(metabolite_id) == "ADP":
 			expected += config.division_atp_cost
 		_assert_close(a.pool(String(metabolite_id)) + b.pool(String(metabolite_id)), expected, 1e-10, "division conserves %s after explicit ATP->ADP cost" % metabolite_id)
+	_assert_close(a.total_mrna() + b.total_mrna(), mrna_before, 1e-9, "stochastic partition conserves total inherited mRNA")
+	_assert_close(a.total_protein() + b.total_protein(), protein_before, 1e-9, "stochastic partition conserves total inherited protein")
 	_assert_true(a.parent_id == 1 and b.parent_id == 1, "both daughters retain immutable parent identity")
 	_assert_true(a.generation == 1 and b.generation == 1, "both daughters advance generation")
 
@@ -116,7 +120,7 @@ func _test_mutation_disabled_inheritance_is_deep_copy() -> void:
 	var world = WorldStateScript.new(8, 8, 1.0)
 	var parent = CellStateScript.new(10, -1, 0, 0, Vector2(4.0, 4.0), config.division_volume)
 	parent.genome = GenomeScript.create_ancestor()
-	parent.initialize_metabolism(config)
+	parent.initialize_molecular_state(config)
 	parent.set_pool("BIO", config.division_volume * config.biomass_units_per_volume)
 	parent.volume = config.division_volume
 	parent.set_pool("ATP", 5.0)
@@ -126,6 +130,7 @@ func _test_mutation_disabled_inheritance_is_deep_copy() -> void:
 	var b = daughters[1]
 	_assert_true(a.genome.canonical_key() == parent_key and b.genome.canonical_key() == parent_key, "mutation-free daughters inherit exact parental genotype")
 	_assert_true(a.genome != b.genome and a.genome.genes[0] != b.genome.genes[0], "sister genomes are independent mutable copies")
+	_assert_true(a.expression_state != b.expression_state, "sister expression states are independent containers")
 
 func _forced_mutation_config():
 	var config = SimConfigScript.new()
@@ -166,24 +171,24 @@ func _test_neutral_marker_remains_physically_neutral() -> void:
 	var neutral_genome = base_genome.deep_copy()
 	neutral_genome.genes[0].neutral_marker += 1
 	var reactions: Array = ReactionCatalogScript.create_m4_candidate()
-
 	var a = CellStateScript.new(1, -1, 0, 0, Vector2(4.0, 4.0), 1.0)
 	var b = CellStateScript.new(2, -1, 0, 0, Vector2(4.0, 4.0), 1.0)
 	a.genome = base_genome
 	b.genome = neutral_genome
-	a.initialize_metabolism(config)
-	b.initialize_metabolism(config)
-	for metabolite_id in ["G", "O2", "NH4", "P"]:
+	a.initialize_molecular_state(config)
+	b.initialize_molecular_state(config)
+	for metabolite_id in ["G", "O2", "NH4", "P", "AA", "NUC"]:
 		a.set_pool(metabolite_id, 0.5)
 		b.set_pool(metabolite_id, 0.5)
 	var request_a: Dictionary = a.transport_requests(config.tick_dt_min, world, config)
 	var request_b: Dictionary = b.transport_requests(config.tick_dt_min, world, config)
 	_assert_true(request_a == request_b, "neutral marker does not alter membrane requests")
-	a.step_intracellular(config.tick_dt_min, config, reactions)
-	b.step_intracellular(config.tick_dt_min, config, reactions)
-	_assert_close(a.pool("ATP"), b.pool("ATP"), 1e-12, "neutral marker does not alter ATP physiology")
+	a.step_intracellular(config.tick_dt_min, config, reactions, DeterministicRngScript.new(811))
+	b.step_intracellular(config.tick_dt_min, config, reactions, DeterministicRngScript.new(811))
+	_assert_close(a.pool("ATP"), b.pool("ATP"), 1e-12, "neutral marker does not alter ATP physiology under identical molecular noise")
 	_assert_close(a.volume, b.volume, 1e-12, "neutral marker does not alter biomass physiology")
 	_assert_close(a.damage, b.damage, 1e-12, "neutral marker does not alter damage physiology")
+	_assert_close(ExpressionSystemScript.checksum(a.expression_state), ExpressionSystemScript.checksum(b.expression_state), 1e-12, "neutral marker does not alter expression trajectory")
 
 func _test_mutation_frequency_matches_configured_probability() -> void:
 	var config = SimConfigScript.new()
@@ -209,7 +214,7 @@ func _test_simulation_records_mutation_ancestry() -> void:
 	config.max_cells = 4
 	var sim = SimulationEngineScript.new(config)
 	sim.seed_ancestor()
-	sim.step(1200)
+	sim.step(1600)
 	_assert_true(sim.mutation_event_count() > 0, "simulation records molecular mutation events")
 	var checked: bool = false
 	for event in sim.event_log:
@@ -228,14 +233,14 @@ func _test_cell_grows_and_divides_with_resources() -> void:
 	config.mutation_enabled = false
 	var sim = SimulationEngineScript.new(config)
 	sim.seed_ancestor()
-	sim.step(1200)
-	_assert_true(sim.population_size() > 1, "resource-fed ancestor produces descendants through explicit chemistry")
-	_assert_true(sim.maximum_generation() >= 1, "metabolic biomass accumulation advances generation")
+	sim.step(1600)
+	_assert_true(sim.population_size() > 1, "resource-fed ancestor produces descendants through explicit expression plus chemistry")
+	_assert_true(sim.maximum_generation() >= 1, "molecular expression and metabolic biomass accumulation advance generation")
 	var division_events: int = 0
 	for event in sim.event_log:
 		if event["kind"] == "division":
 			division_events += 1
-	_assert_true(division_events > 0, "chemistry-supported division event is recorded")
+	_assert_true(division_events > 0, "expression-supported division event is recorded")
 
 func _test_cell_dies_without_energy_source() -> void:
 	var config = SimConfigScript.new()
@@ -251,10 +256,10 @@ func _test_cell_dies_without_energy_source() -> void:
 	config.phosphorus_diffusion = 0.0
 	var sim = SimulationEngineScript.new(config)
 	sim.seed_ancestor()
-	sim.step(800)
-	_assert_true(sim.population_size() == 0, "cell eventually dies when ATP maintenance cannot be replenished")
+	sim.step(1000)
+	_assert_true(sim.population_size() == 0, "cell eventually dies when ATP maintenance/expression cannot be replenished")
 
-func _test_same_seed_reproduces_same_history() -> void:
+func _test_same_seed_reproduces_same_history_including_expression_noise() -> void:
 	var config_a = SimConfigScript.new()
 	config_a.world_width = 16
 	config_a.world_height = 16
@@ -269,11 +274,11 @@ func _test_same_seed_reproduces_same_history() -> void:
 	var second = SimulationEngineScript.new(config_b)
 	first.seed_ancestor()
 	second.seed_ancestor()
-	first.step(700)
-	second.step(700)
-	_assert_true(first.population_size() == second.population_size(), "same seed reproduces population size")
+	first.step(900)
+	second.step(900)
+	_assert_true(first.population_size() == second.population_size(), "same seed reproduces population size with expression noise")
 	_assert_true(first.event_log == second.event_log, "same seed reproduces exact semantic event history")
-	_assert_close(first.checksum(), second.checksum(), 1e-9, "same seed reproduces complete chemistry/genetics checksum")
+	_assert_close(first.checksum(), second.checksum(), 1e-9, "same seed reproduces chemistry genetics and expression state")
 
 func _assert_true(condition: bool, message: String) -> void:
 	tests_run += 1
