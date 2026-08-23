@@ -104,3 +104,6 @@ jobs:
 
       - name: Execute frozen M8 regulatory confirmation panel
         run: godot --headless --path . --script tests/m8_regulatory_confirmation_tests.gd
+
+      - name: Validate compact M9 exact causal laboratory
+        run: godot --headless --path . --script tests/m9_causal_lab_tests.gd
