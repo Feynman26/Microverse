@@ -50,3 +50,6 @@ jobs:
 
       - name: Validate M5-B regulation and sensing
         run: godot --headless --path . --script tests/m5_regulation_tests.gd
+
+      - name: Validate M5-C regulatory selection
+        run: godot --headless --path . --script tests/m5_selection_tests.gd
