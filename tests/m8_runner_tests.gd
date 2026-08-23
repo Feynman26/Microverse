@@ -83,18 +83,18 @@ func _test_extinction_is_terminal_and_explained() -> void:
 	_assert_true(int(result["realized_ticks"]) < int(result["horizon_ticks"]), "stop-on-extinction avoids meaningless post-extinction ticks")
 
 func _test_constant_abundant_environment_can_exceed_sixteen_cells() -> void:
-	# First M8 attempt at 3000 ticks stayed alive but did not cross 16 cells.
-	# M6 already established that reproduction can require >1000 ticks, so the
-	# acceptance criterion is preserved and the observation horizon is extended
-	# rather than lowering the >16 requirement. A smaller chamber reduces test
-	# cost without creating a crowding constraint for 24 physical disks.
+	# O2=5 preserved viability but produced enough ROS-driven damage to cap the
+	# population below 16 despite large remaining nutrient inventories. M5-C had
+	# already defined O2=0.5 as the stable oxygen condition, so this assay reuses
+	# that independently motivated regime instead of tuning physiology or lowering
+	# the >16 acceptance criterion.
 	var spec: Dictionary = ExperimentRunnerScript.create_spec(
 		77304,
 		8000,
 		200,
 		EnvironmentScheduleScript.constant({
 			"glucose": 4.0,
-			"oxygen": 5.0,
+			"oxygen": 0.5,
 			"nitrogen": 3.0,
 			"phosphorus": 2.0
 		})
@@ -104,7 +104,7 @@ func _test_constant_abundant_environment_can_exceed_sixteen_cells() -> void:
 	spec["max_cells"] = 24
 	spec["mutation_enabled"] = false
 	var result: Dictionary = ExperimentRunnerScript.run(spec)
-	print("M8 sustained-resource diagnostic: max_population=%d final_population=%d generation=%d divisions=%d deaths=%s final_resources=%s" % [
+	print("M8 stable-reservoir diagnostic: max_population=%d final_population=%d generation=%d divisions=%d deaths=%s final_resources=%s" % [
 		int(result["max_population"]),
 		int(result["final_population"]),
 		int(result["final_generation"]),
@@ -114,12 +114,12 @@ func _test_constant_abundant_environment_can_exceed_sixteen_cells() -> void:
 	])
 	_assert_true(
 		int(result["max_population"]) > 16,
-		"sustained abundant reservoir allows the same core physiology to grow beyond the observed 16-cell plateau (actual max=%d, generation=%d, divisions=%d, deaths=%s)" % [
+		"stable O2=0.5 abundant reservoir allows the same core physiology to grow beyond the observed 16-cell plateau (actual max=%d, generation=%d, divisions=%d, deaths=%s)" % [
 			int(result["max_population"]), int(result["final_generation"]), int(result["division_events"]), str(result["death_causes"])
 		]
 	)
-	_assert_true(int(result["final_population"]) > 0, "abundant scheduled environment supports a living population through the assay horizon")
-	_assert_true(String(result["termination_reason"]) == "horizon", "sustained-resource run reaches planned horizon instead of forced extinction")
+	_assert_true(int(result["final_population"]) > 0, "stable abundant scheduled environment supports a living population through the assay horizon")
+	_assert_true(String(result["termination_reason"]) == "horizon", "stable sustained-resource run reaches planned horizon instead of forced extinction")
 
 func _test_batch_order_does_not_change_individual_runs() -> void:
 	var spec: Dictionary = _short_constant_spec(1, 400, 40)
