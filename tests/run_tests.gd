@@ -134,6 +134,10 @@ func _test_mutation_disabled_inheritance_is_deep_copy() -> void:
 
 func _forced_mutation_config():
 	var config = SimConfigScript.new()
+	# This is the historical M3 forced-Bernoulli harness. Disable M10 physical
+	# replication here explicitly so it continues testing the old mutation API,
+	# not the production replication-derived fidelity path.
+	config.evolvable_replication_enabled = false
 	config.promoter_mutation_rate_per_gene = 1.0
 	config.signature_mutation_rate_per_gene = 1.0
 	config.neutral_marker_mutation_rate_per_gene = 1.0
