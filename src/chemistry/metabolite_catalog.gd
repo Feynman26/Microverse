@@ -3,7 +3,9 @@ class_name MetaboliteCatalog
 
 # Structural C/N/P bookkeeping is deliberately separate from ATP/ADP and
 # NAD/NADH energetic/redox currencies. The values are digital structural units,
-# not claims about exact molecular formulas.
+# not claims about exact molecular formulas. BIO is assembled cell material: it
+# remains inside the authoritative pool ledger and therefore lets physical cell
+# volume be derived from chemistry instead of incremented by a growth knob.
 
 const DEFINITIONS: Dictionary = {
 	"G": {"name": "carbon_source", "C": 6, "N": 0, "P": 0},
@@ -17,6 +19,7 @@ const DEFINITIONS: Dictionary = {
 	"AA": {"name": "amino_acid_precursor", "C": 2, "N": 1, "P": 0},
 	"LIP": {"name": "lipid_precursor", "C": 4, "N": 0, "P": 0},
 	"NUC": {"name": "nucleotide_precursor", "C": 2, "N": 1, "P": 1},
+	"BIO": {"name": "assembled_structural_biomass", "C": 12, "N": 4, "P": 2},
 	"ATP": {"name": "energy_currency_high", "C": 0, "N": 0, "P": 0},
 	"ADP": {"name": "energy_currency_low", "C": 0, "N": 0, "P": 0},
 	"NAD": {"name": "redox_currency_oxidized", "C": 0, "N": 0, "P": 0},
