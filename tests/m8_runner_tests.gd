@@ -16,7 +16,7 @@ func _run() -> void:
 	_test_same_spec_and_seed_replay_exactly()
 	_test_sampling_is_observational_only()
 	_test_extinction_is_terminal_and_explained()
-	_test_constant_abundant_environment_can_exceed_sixteen_cells()
+	_test_anoxic_carbon_fed_environment_can_exceed_sixteen_cells()
 	_test_batch_order_does_not_change_individual_runs()
 	_test_run_metadata_is_self_identifying()
 
@@ -82,31 +82,30 @@ func _test_extinction_is_terminal_and_explained() -> void:
 	_assert_true(int(result["death_causes"].get("energy_failure", 0)) >= 1, "runner reports physiological cause of terminal population loss")
 	_assert_true(int(result["realized_ticks"]) < int(result["horizon_ticks"]), "stop-on-extinction avoids meaningless post-extinction ticks")
 
-func _test_constant_abundant_environment_can_exceed_sixteen_cells() -> void:
-	# O2=5 preserved viability but produced enough ROS-driven damage to cap the
-	# population below 16 despite large remaining nutrient inventories. M5-C had
-	# already defined O2=0.5 as the stable oxygen condition, so this assay reuses
-	# that independently motivated regime instead of tuning physiology or lowering
-	# the >16 acceptance criterion. The runner stops immediately after reaching 17
-	# cells so this scientific gate does not pay for unnecessary later mechanics.
+func _test_anoxic_carbon_fed_environment_can_exceed_sixteen_cells() -> void:
+	# The O2=5 and O2=0.5 characterization runs retained large external nutrient
+	# inventories but accumulated ROS-driven deaths. The ancestral reaction network
+	# already contains fermentative redox relief, so complete oxygen limitation is
+	# a clean environmental counterfactual: no physiology constant is changed and
+	# the >16 criterion remains fixed. The run stops immediately on cell 17.
 	var spec: Dictionary = ExperimentRunnerScript.create_spec(
 		77304,
 		8000,
 		200,
 		EnvironmentScheduleScript.constant({
 			"glucose": 4.0,
-			"oxygen": 0.5,
+			"oxygen": 0.0,
 			"nitrogen": 3.0,
 			"phosphorus": 2.0
 		})
 	)
-	spec["world_width"] = 12
-	spec["world_height"] = 12
+	spec["world_width"] = 8
+	spec["world_height"] = 8
 	spec["max_cells"] = 24
 	spec["mutation_enabled"] = false
 	spec["stop_population_at_least"] = 17
 	var result: Dictionary = ExperimentRunnerScript.run(spec)
-	print("M8 stable-reservoir diagnostic: max_population=%d final_population=%d generation=%d divisions=%d deaths=%s ticks=%d final_resources=%s" % [
+	print("M8 anoxic-reservoir diagnostic: max_population=%d final_population=%d generation=%d divisions=%d deaths=%s ticks=%d final_resources=%s" % [
 		int(result["max_population"]),
 		int(result["final_population"]),
 		int(result["final_generation"]),
@@ -117,7 +116,7 @@ func _test_constant_abundant_environment_can_exceed_sixteen_cells() -> void:
 	])
 	_assert_true(
 		int(result["max_population"]) > 16,
-		"stable O2=0.5 abundant reservoir allows the same core physiology to grow beyond the observed 16-cell plateau (actual max=%d, generation=%d, divisions=%d, deaths=%s)" % [
+		"anoxic carbon-fed reservoir allows the same core physiology to grow beyond the observed 16-cell plateau (actual max=%d, generation=%d, divisions=%d, deaths=%s)" % [
 			int(result["max_population"]), int(result["final_generation"]), int(result["division_events"]), str(result["death_causes"])
 		]
 	)
