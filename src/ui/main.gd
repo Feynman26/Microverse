@@ -72,18 +72,20 @@ func _draw_cells() -> void:
 
 func _create_labels() -> void:
 	_status_label = Label.new()
-	_status_label.position = Vector2(555.0, 75.0)
-	_status_label.size = Vector2(340.0, 420.0)
+	_status_label.position = Vector2(555.0, 60.0)
+	_status_label.size = Vector2(360.0, 620.0)
 	add_child(_status_label)
 
 	_help_label = Label.new()
 	_help_label.position = Vector2(20.0, 15.0)
-	_help_label.text = "Microverse M3  |  SPACE pause  |  1: 1x  2: 10x  3: 100x  4: 1000x  5: 5000x"
+	_help_label.text = "Microverse M4  |  SPACE pause  |  1: 1x  2: 10x  3: 100x  4: 1000x  5: 5000x"
 	add_child(_help_label)
 
 func _update_status() -> void:
 	var glucose_total: float = simulation.world.get_field("glucose").total_amount()
 	var oxygen_total: float = simulation.world.get_field("oxygen").total_amount()
+	var nitrogen_total: float = simulation.world.get_field("nitrogen").total_amount()
+	var phosphorus_total: float = simulation.world.get_field("phosphorus").total_amount()
 	var state: String = "PAUSED" if paused else "RUNNING"
 	_status_label.text = (
 		"STATE: %s\n\n" % state
@@ -94,10 +96,38 @@ func _update_status() -> void:
 		+ "Max generation: %d\n" % simulation.maximum_generation()
 		+ "Genotypes alive: %d\n" % simulation.genotype_count()
 		+ "Mutation events: %d\n" % simulation.mutation_event_count()
-		+ "Total cell volume: %.3f\n\n" % simulation.total_cell_volume()
-		+ "Environmental glucose: %.2f\n" % glucose_total
-		+ "Environmental oxygen: %.2f\n\n" % oxygen_total
-		+ "Events recorded: %d\n" % simulation.event_log.size()
+		+ "Total BIO-volume: %.3f\n\n" % simulation.total_cell_volume()
+		+ "Environment\n"
+		+ "  G: %.2f  O2: %.2f\n" % [glucose_total, oxygen_total]
+		+ "  N: %.2f  P: %.2f\n\n" % [nitrogen_total, phosphorus_total]
+		+ _focal_cell_status()
+		+ "\nEvents recorded: %d\n" % simulation.event_log.size()
 		+ "Seed: %d\n" % simulation.config.seed
 		+ "Checksum: %.6f" % simulation.checksum()
 	)
+
+func _focal_cell_status() -> String:
+	if simulation.cells.is_empty():
+		return "Focal cell: none (extinction)\n"
+	var cell = simulation.cells[0]
+	var dominant: Dictionary = _dominant_flux(cell)
+	return (
+		"Focal cell #%d  gen %d\n" % [cell.id, cell.generation]
+		+ "  genotype: %d\n" % cell.genome.fingerprint()
+		+ "  volume/BIO: %.3f / %.3f\n" % [cell.volume, cell.pool("BIO")]
+		+ "  ATP/ADP: %.3f / %.3f\n" % [cell.pool("ATP"), cell.pool("ADP")]
+		+ "  G/C3/C2: %.3f / %.3f / %.3f\n" % [cell.pool("G"), cell.pool("C3"), cell.pool("C2")]
+		+ "  W1/W2: %.3f / %.3f\n" % [cell.pool("W1"), cell.pool("W2")]
+		+ "  ROS/damage: %.3f / %.3f\n" % [cell.pool("ROS"), cell.damage]
+		+ "  dominant flux: %s %.5f\n\n" % [dominant["reaction_id"], dominant["flux"]]
+	)
+
+func _dominant_flux(cell) -> Dictionary:
+	var best_id: String = "none"
+	var best_flux: float = 0.0
+	for reaction_id in cell.last_fluxes.keys():
+		var flux: float = float(cell.last_fluxes[reaction_id])
+		if flux > best_flux:
+			best_flux = flux
+			best_id = String(reaction_id)
+	return {"reaction_id": best_id, "flux": best_flux}
