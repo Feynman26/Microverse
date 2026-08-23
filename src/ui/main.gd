@@ -5,11 +5,24 @@ const SimulationEngineScript = preload("res://src/simulation/simulation_engine.g
 const TILE_PX: float = 8.0
 const WORLD_ORIGIN: Vector2 = Vector2(20.0, 70.0)
 const BASE_SIM_MIN_PER_REAL_SEC: float = 1.0
+# Rendering and status are observers. They do not need to execute at the
+# biological tick rate. A bounded simulation CPU slice keeps input/rendering
+# responsive even when the requested virtual-time multiplier exceeds hardware.
+const MAX_SIM_CPU_USEC_PER_FRAME: int = 12000
+const MAX_TICKS_PER_FRAME: int = 256
+const STATUS_REFRESH_SEC: float = 0.25
+const DRAW_REFRESH_SEC: float = 0.10
+const SPEED_MEASURE_SEC: float = 0.50
 
 var simulation
 var paused: bool = false
 var time_multiplier: float = 10.0
 var _sim_minute_budget: float = 0.0
+var _status_refresh_budget: float = 0.0
+var _draw_refresh_budget: float = 0.0
+var _speed_elapsed: float = 0.0
+var _speed_ticks: int = 0
+var _actual_ticks_per_sec: float = 0.0
 var _status_label: Label
 var _help_label: Label
 
@@ -17,18 +30,44 @@ func _ready() -> void:
 	simulation = SimulationEngineScript.new()
 	simulation.seed_ancestor()
 	_create_labels()
+	_update_status()
 	queue_redraw()
 
 func _process(delta: float) -> void:
+	var ticks_ran: int = 0
 	if not paused:
 		_sim_minute_budget += delta * BASE_SIM_MIN_PER_REAL_SEC * time_multiplier
-		var ticks_to_run: int = int(floor(_sim_minute_budget / simulation.config.tick_dt_min))
-		ticks_to_run = mini(ticks_to_run, 5000)
-		if ticks_to_run > 0:
-			simulation.step(ticks_to_run)
-			_sim_minute_budget -= float(ticks_to_run) * simulation.config.tick_dt_min
-	_update_status()
-	queue_redraw()
+		# Do not accumulate minutes of wall-clock lag when hardware cannot meet a
+		# requested multiplier. No biological tick is skipped: the achieved clock
+		# simply runs slower and is reported explicitly to the user.
+		var max_backlog: float = maxf(1.0, BASE_SIM_MIN_PER_REAL_SEC * time_multiplier * 0.5)
+		_sim_minute_budget = minf(_sim_minute_budget, max_backlog)
+		var deadline_usec: int = Time.get_ticks_usec() + MAX_SIM_CPU_USEC_PER_FRAME
+		while (
+			_sim_minute_budget + 1e-12 >= float(simulation.config.tick_dt_min)
+			and ticks_ran < MAX_TICKS_PER_FRAME
+		):
+			simulation.step(1)
+			_sim_minute_budget -= float(simulation.config.tick_dt_min)
+			ticks_ran += 1
+			if Time.get_ticks_usec() >= deadline_usec:
+				break
+
+	_speed_ticks += ticks_ran
+	_speed_elapsed += delta
+	if _speed_elapsed >= SPEED_MEASURE_SEC:
+		_actual_ticks_per_sec = float(_speed_ticks) / maxf(_speed_elapsed, 1e-9)
+		_speed_elapsed = 0.0
+		_speed_ticks = 0
+
+	_status_refresh_budget += delta
+	_draw_refresh_budget += delta
+	if _status_refresh_budget >= STATUS_REFRESH_SEC:
+		_status_refresh_budget = fmod(_status_refresh_budget, STATUS_REFRESH_SEC)
+		_update_status()
+	if _draw_refresh_budget >= DRAW_REFRESH_SEC:
+		_draw_refresh_budget = fmod(_draw_refresh_budget, DRAW_REFRESH_SEC)
+		queue_redraw()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not event is InputEventKey or not event.pressed or event.echo:
@@ -78,7 +117,7 @@ func _create_labels() -> void:
 
 	_help_label = Label.new()
 	_help_label.position = Vector2(20.0, 15.0)
-	_help_label.text = "Microverse M5-A  |  SPACE pause  |  1: 1x  2: 10x  3: 100x  4: 1000x  5: 5000x"
+	_help_label.text = "Microverse M10  |  SPACE pause  |  1: 1x  2: 10x  3: 100x  4: 1000x  5: 5000x"
 	add_child(_help_label)
 
 func _update_status() -> void:
@@ -87,16 +126,23 @@ func _update_status() -> void:
 	var nitrogen_total: float = simulation.world.get_field("nitrogen").total_amount()
 	var phosphorus_total: float = simulation.world.get_field("phosphorus").total_amount()
 	var state: String = "PAUSED" if paused else "RUNNING"
+	var achieved_multiplier: float = (
+		_actual_ticks_per_sec * float(simulation.config.tick_dt_min) / BASE_SIM_MIN_PER_REAL_SEC
+	)
+	var division: Dictionary = _division_status()
 	_status_label.text = (
 		"STATE: %s\n\n" % state
-		+ "Experimental clock: %.0fx\n" % time_multiplier
+		+ "Requested clock: %.0fx\n" % time_multiplier
+		+ "Achieved clock: %.1fx (%.1f ticks/s)\n" % [achieved_multiplier, _actual_ticks_per_sec]
 		+ "Tick: %d\n" % simulation.tick_index
 		+ "Virtual time: %.1f min\n\n" % simulation.simulation_time_min
 		+ "Population: %d / %d\n" % [simulation.population_size(), simulation.config.max_cells]
 		+ "Max generation: %d\n" % simulation.maximum_generation()
 		+ "Genotypes alive: %d\n" % simulation.genotype_count()
 		+ "Mutation events: %d\n" % simulation.mutation_event_count()
-		+ "Total BIO-volume: %.3f\n\n" % simulation.total_cell_volume()
+		+ "Total BIO-volume: %.3f\n" % simulation.total_cell_volume()
+		+ "Division ready: %d\n" % int(division["ready"])
+		+ "  size-ready / ATP-blocked: %d / %d\n\n" % [int(division["volume_ready"]), int(division["volume_ready_atp_blocked"])]
 		+ "Environment\n"
 		+ "  G: %.2f  O2: %.2f\n" % [glucose_total, oxygen_total]
 		+ "  N: %.2f  P: %.2f\n\n" % [nitrogen_total, phosphorus_total]
@@ -105,6 +151,27 @@ func _update_status() -> void:
 		+ "Seed: %d\n" % simulation.config.seed
 		+ "Checksum: %.6f" % simulation.checksum()
 	)
+
+func _division_status() -> Dictionary:
+	var ready: int = 0
+	var volume_ready: int = 0
+	var volume_ready_atp_blocked: int = 0
+	for cell in simulation.cells:
+		if not cell.alive:
+			continue
+		var has_volume: bool = float(cell.volume) >= float(simulation.config.division_volume)
+		var has_atp: bool = float(cell.pool("ATP")) >= float(simulation.config.division_atp_cost)
+		if has_volume:
+			volume_ready += 1
+			if has_atp:
+				ready += 1
+			else:
+				volume_ready_atp_blocked += 1
+	return {
+		"ready": ready,
+		"volume_ready": volume_ready,
+		"volume_ready_atp_blocked": volume_ready_atp_blocked
+	}
 
 func _focal_cell_status() -> String:
 	if simulation.cells.is_empty():
