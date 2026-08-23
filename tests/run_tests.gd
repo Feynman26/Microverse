@@ -6,6 +6,7 @@ const ChemicalFieldScript = preload("res://src/world/chemical_field.gd")
 const WorldStateScript = preload("res://src/world/world_state.gd")
 const CellStateScript = preload("res://src/biology/cell_state.gd")
 const SimulationEngineScript = preload("res://src/simulation/simulation_engine.gd")
+const MainUiScript = preload("res://src/ui/main.gd")
 
 var failures: int = 0
 var tests_run: int = 0
@@ -14,6 +15,8 @@ func _init() -> void:
 	call_deferred("_run")
 
 func _run() -> void:
+	# Referencing the preloaded UI script makes parse failures part of this suite.
+	_assert_true(MainUiScript != null, "main UI script parses")
 	_test_diffusion_conserves_mass_and_nonnegativity()
 	_test_competing_identical_cells_are_order_fair()
 	_test_division_conserves_partitioned_pools()
@@ -47,7 +50,7 @@ func _test_competing_identical_cells_are_order_fair() -> void:
 	config.oxygen_diffusion = 0.0
 	config.glucose_transport_vmax = 10.0
 	var sim = SimulationEngineScript.new(config)
-	var position := Vector2(4.0, 4.0)
+	var position: Vector2 = Vector2(4.0, 4.0)
 	var first = sim.seed_ancestor(position)
 	var second = sim.seed_ancestor(position)
 	sim.step(1)
@@ -67,7 +70,7 @@ func _test_division_conserves_partitioned_pools() -> void:
 	parent.damage = 0.2
 	parent.energy_debt = 0.1
 
-	var expected_atp := parent.atp - config.division_atp_cost
+	var expected_atp: float = float(parent.atp) - float(config.division_atp_cost)
 	var daughters: Array = parent.create_daughters(2, 3, 7, rng, world, config)
 	var a = daughters[0]
 	var b = daughters[1]
@@ -89,8 +92,8 @@ func _test_cell_grows_and_divides_with_resources() -> void:
 	sim.step(300)
 	_assert_true(sim.population_size() > 1, "resource-fed ancestor produces descendants")
 	_assert_true(sim.maximum_generation() >= 1, "division advances generation")
-	var division_events := 0
-	var birth_events := 0
+	var division_events: int = 0
+	var birth_events: int = 0
 	for event in sim.event_log:
 		if event["kind"] == "division":
 			division_events += 1
