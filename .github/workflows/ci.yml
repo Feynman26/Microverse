@@ -90,4 +90,7 @@ jobs:
       - name: Validate M7 extracellular public good and exploitation
         run: godot --headless --path . --script tests/m7_public_good_tests.gd
 
+      - name: Validate M7 neighborhood detoxification
+        run: godot --headless --path . --script tests/m7_detoxification_tests.gd
+
       # Frozen M5-C reproductive panels remain research evidence, not CI gates.
