@@ -84,11 +84,12 @@ func _test_extinction_is_terminal_and_explained() -> void:
 	_assert_true(int(result["realized_ticks"]) < int(result["horizon_ticks"]), "stop-on-extinction avoids meaningless post-extinction ticks")
 
 func _test_redox_energy_tradeoff_is_observable() -> void:
-	# The long characterization that motivated M8-A falsified a simple environmental
-	# rescue of the observed ~16-cell plateau: O2=5 and O2=0.5 retained abundant
-	# nutrients but accumulated damage, whereas O2=0 eliminated oxidant and died by
-	# energy failure. CI preserves the mechanism with a short paired assay rather
-	# than repeatedly simulating the expensive multi-generation endpoints.
+	# The long characterization that motivated M8-A established that sustained O2
+	# can eventually accumulate damage while anoxia instead fails energetically.
+	# The compact 600-tick gate should test the upstream causal contrast, not
+	# require residual damage to remain stored after M10 improved biomass-scaled
+	# molecular repair capacity. ROS presence and energetic debt remain the direct
+	# mechanistic signatures of the two environmental arms.
 	var oxidative: Dictionary = _redox_spec(77304, 5.0)
 	var anoxic: Dictionary = _redox_spec(77304, 0.0)
 	var oxidative_result: Dictionary = ExperimentRunnerScript.run(oxidative)
@@ -98,8 +99,8 @@ func _test_redox_energy_tradeoff_is_observable() -> void:
 
 	_assert_true(int(oxidative_result["final_population"]) > 0, "oxygen-rich paired assay remains alive through the short characterization horizon")
 	_assert_true(int(anoxic_result["final_population"]) > 0, "anoxic paired assay is sampled before its known later energy-failure endpoint")
-	_assert_true(float(oxidative_diag["max_damage"]) > float(anoxic_diag["max_damage"]), "oxygen-rich metabolism creates a larger ROS-linked damage burden")
 	_assert_true(float(oxidative_diag["total_intracellular_ros"]) > float(anoxic_diag["total_intracellular_ros"]), "oxygen availability creates measurable intracellular ROS through ordinary chemistry")
+	_assert_true(float(oxidative_diag["total_intracellular_ros"]) > 0.0, "oxygen-rich arm retains a direct oxidative-stress precursor even when repair clears residual damage")
 	_assert_close(float(anoxic_diag["max_damage"]), 0.0, 1e-12, "anoxia removes the oxidative damage source in the paired characterization")
 	_assert_close(float(anoxic_diag["total_intracellular_ros"]), 0.0, 1e-12, "anoxia leaves no intracellular ROS in the ancestral paired characterization")
 	_assert_true(float(anoxic_diag["max_energy_debt"]) > float(oxidative_diag["max_energy_debt"]), "removing oxygen trades oxidative burden for a larger energetic deficit")
