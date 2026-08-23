@@ -69,7 +69,7 @@ static func run_lineage(
 		var oxygen_value: float = BaseGxe.HIGH_OXYGEN
 		if condition == CONDITION_HIGH_ANOXIC:
 			var phase: int = ((tick + phase_offset_ticks) / BaseGxe.PHASE_TICKS) % 2
-			oxygen_value = BaseGxe.HIGH_OXYGEN if phase == 0 else BaseGxe.ANOXIC_OXYGEN
+			oxygen_value = BaseGxe.HIGH_OXYGEN if phase == 0 else BaseGxe.LOW_OXYGEN
 		_maintain_environment(sim, oxygen_value)
 		sim.step(1)
 		realized_ticks += 1
