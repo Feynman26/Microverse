@@ -49,6 +49,9 @@ static func run_lineage(
 	var growth_rate: float = 0.0
 	if reached_division and elapsed_min > 0.0:
 		growth_rate = log(2.0) / elapsed_min
+	var has_cell: bool = not sim.cells.is_empty()
+	if has_cell:
+		cell = sim.cells[0]
 	return {
 		"seed": seed,
 		"genotype": genotype_name,
@@ -57,7 +60,13 @@ static func run_lineage(
 		"ticks": realized_ticks,
 		"time_min": elapsed_min,
 		"reached_division": reached_division,
-		"growth_rate": growth_rate
+		"growth_rate": growth_rate,
+		"alive": has_cell and bool(cell.alive),
+		"death_reason": "" if not has_cell else String(cell.death_reason),
+		"volume": 0.0 if not has_cell else float(cell.volume),
+		"atp": 0.0 if not has_cell else float(cell.pool("ATP")),
+		"damage": 0.0 if not has_cell else float(cell.damage),
+		"energy_debt": 0.0 if not has_cell else float(cell.energy_debt)
 	}
 
 static func run_panel(seeds: Array, max_ticks: int = BaseGxe.MAX_TICKS) -> Dictionary:
@@ -74,16 +83,26 @@ static func run_panel(seeds: Array, max_ticks: int = BaseGxe.MAX_TICKS) -> Dicti
 		var stable_adv: float = float(stable_r["growth_rate"]) - float(stable_c["growth_rate"])
 		var reference_rate: float = maxf(1e-12, 0.5 * (float(stable_r["growth_rate"]) + float(stable_c["growth_rate"])))
 		var fluct_advantages: Array = []
+		var runs: Array = []
 		for offset_variant in offsets:
 			var offset: int = int(offset_variant)
 			var fc: Dictionary = run_lineage(seed, "constitutive", BaseGxe.CONDITION_HIGH_ANOXIC, offset, max_ticks)
 			var fr: Dictionary = run_lineage(seed, "responsive", BaseGxe.CONDITION_HIGH_ANOXIC, offset, max_ticks)
 			all_divided = all_divided and bool(fc["reached_division"]) and bool(fr["reached_division"])
 			fluct_advantages.append(float(fr["growth_rate"]) - float(fc["growth_rate"]))
+			runs.append({"offset": offset, "constitutive": fc, "responsive": fr})
 		var fluct_adv: float = _mean(fluct_advantages)
 		var normalized: float = (fluct_adv - stable_adv) / reference_rate
 		values.append(normalized)
-		seed_results.append({"seed": seed, "stable_advantage": stable_adv, "fluctuating_advantage": fluct_adv, "normalized_differential": normalized})
+		seed_results.append({
+			"seed": seed,
+			"stable_advantage": stable_adv,
+			"fluctuating_advantage": fluct_adv,
+			"normalized_differential": normalized,
+			"stable_constitutive": stable_c,
+			"stable_responsive": stable_r,
+			"runs": runs
+		})
 	return {"all_divided": all_divided, "seed_results": seed_results, "normalized_differentials": values, "mean_normalized_differential": _mean(values), "sample_sd": _sample_sd(values)}
 
 static func _maintain_environment(sim, oxygen_value: float) -> void:
