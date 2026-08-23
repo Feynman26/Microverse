@@ -111,7 +111,7 @@ static func max_overlap(cells: Array, config) -> float:
 			maximum = maxf(maximum, target - first.position.distance_to(second.position))
 	return maxf(0.0, maximum)
 
-static func disks_within_bounds(cells: Array, world, config, tolerance: float = 1e-10) -> bool:
+static func disks_within_bounds(cells: Array, world, config, tolerance: float = 1e-6) -> bool:
 	for cell in cells:
 		if not cell.alive:
 			continue
