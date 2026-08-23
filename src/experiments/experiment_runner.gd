@@ -5,8 +5,8 @@ const SimConfigScript = preload("res://src/core/sim_config.gd")
 const SimulationEngineScript = preload("res://src/simulation/simulation_engine.gd")
 const EnvironmentScheduleScript = preload("res://src/experiments/environment_schedule.gd")
 
-const SCHEMA_VERSION: int = 1
-const MODEL_VERSION: String = "microverse-m8a"
+const SCHEMA_VERSION: int = 2
+const MODEL_VERSION: String = "microverse-m8b"
 
 static func create_spec(
 	seed: int,
@@ -22,6 +22,7 @@ static func create_spec(
 		"horizon_ticks": horizon_ticks,
 		"sample_every_ticks": sample_every_ticks,
 		"environment": environment.duplicate(true),
+		"interventions": [],
 		"stop_on_extinction": true,
 		"stop_population_at_least": 0,
 		"world_width": 64,
@@ -42,6 +43,8 @@ static func run(spec: Dictionary) -> Dictionary:
 	var stop_on_extinction: bool = bool(spec.get("stop_on_extinction", true))
 	var stop_population_at_least: int = int(spec.get("stop_population_at_least", 0))
 	var environment: Dictionary = spec.get("environment", EnvironmentScheduleScript.closed())
+	var interventions: Array = spec.get("interventions", [])
+	var intervention_log: Array = []
 	var trajectory: Array = []
 	var max_population: int = sim.population_size()
 	var termination_reason: String = "horizon"
@@ -49,6 +52,7 @@ static func run(spec: Dictionary) -> Dictionary:
 
 	trajectory.append(_sample(sim))
 	for tick in range(horizon_ticks):
+		_apply_interventions(sim, tick, interventions, int(spec["seed"]), intervention_log)
 		EnvironmentScheduleScript.apply(sim, tick, environment)
 		sim.step(1)
 		realized_ticks += 1
@@ -73,12 +77,13 @@ static func run(spec: Dictionary) -> Dictionary:
 			termination_reason = "population_threshold"
 			break
 
-	var final_cell_diagnostics: Dictionary = _cell_diagnostics(sim)
 	return {
 		"schema_version": SCHEMA_VERSION,
 		"model_version": MODEL_VERSION,
 		"seed": int(spec["seed"]),
 		"environment": environment.duplicate(true),
+		"interventions": interventions.duplicate(true),
+		"intervention_log": intervention_log,
 		"horizon_ticks": horizon_ticks,
 		"realized_ticks": realized_ticks,
 		"termination_reason": termination_reason,
@@ -87,11 +92,13 @@ static func run(spec: Dictionary) -> Dictionary:
 		"final_population": sim.population_size(),
 		"final_generation": sim.maximum_generation(),
 		"final_genotype_count": sim.genotype_count(),
+		"final_genotype_frequencies": _genotype_frequencies(sim),
+		"final_generation_distribution": _generation_distribution(sim),
 		"division_events": _event_count(sim, "division"),
 		"mutation_events": sim.mutation_event_count(),
 		"death_causes": _death_causes(sim),
 		"final_resources": _field_totals(sim),
-		"final_cell_diagnostics": final_cell_diagnostics,
+		"final_cell_diagnostics": _cell_diagnostics(sim),
 		"final_checksum": sim.checksum()
 	}
 
@@ -113,6 +120,51 @@ static func run_batch(spec: Dictionary, seeds: Array) -> Dictionary:
 		"by_seed": by_seed
 	}
 
+# Until M9 introduces a durable snapshot format, paired forks use deterministic
+# prefix replay: every arm has the same seed, initial state, prefix schedule and
+# interventions through fork_tick. The returned prefix checksums prove that both
+# arms reach an identical authoritative state before the environmental fork.
+static func run_paired_fork(
+	base_spec: Dictionary,
+	fork_tick: int,
+	arm_environments: Dictionary
+) -> Dictionary:
+	_validate_spec(base_spec)
+	assert(fork_tick > 0 and fork_tick < int(base_spec["horizon_ticks"]))
+	assert(arm_environments.size() >= 2)
+	var prefix_spec: Dictionary = base_spec.duplicate(true)
+	prefix_spec["horizon_ticks"] = fork_tick
+	prefix_spec["sample_every_ticks"] = fork_tick
+	prefix_spec["stop_population_at_least"] = 0
+	var canonical_prefix: Dictionary = run(prefix_spec)
+	var fork_checksum: float = float(canonical_prefix["final_checksum"])
+
+	var arms: Dictionary = {}
+	var prefix_checksums: Dictionary = {}
+	var arm_names: Array = arm_environments.keys()
+	arm_names.sort()
+	for name_variant in arm_names:
+		var name: String = String(name_variant)
+		var replay_prefix: Dictionary = run(prefix_spec)
+		prefix_checksums[name] = float(replay_prefix["final_checksum"])
+		assert(absf(float(replay_prefix["final_checksum"]) - fork_checksum) <= 1e-12)
+		var arm_spec: Dictionary = base_spec.duplicate(true)
+		arm_spec["environment"] = EnvironmentScheduleScript.forked(
+			base_spec.get("environment", EnvironmentScheduleScript.closed()),
+			fork_tick,
+			arm_environments[name_variant]
+		)
+		arms[name] = run(arm_spec)
+	return {
+		"schema_version": SCHEMA_VERSION,
+		"model_version": MODEL_VERSION,
+		"seed": int(base_spec["seed"]),
+		"fork_tick": fork_tick,
+		"fork_checksum": fork_checksum,
+		"prefix_checksums": prefix_checksums,
+		"arms": arms
+	}
+
 static func _validate_spec(spec: Dictionary) -> void:
 	assert(int(spec.get("schema_version", SCHEMA_VERSION)) == SCHEMA_VERSION)
 	assert(String(spec.get("model_version", MODEL_VERSION)) == MODEL_VERSION)
@@ -125,6 +177,11 @@ static func _validate_spec(spec: Dictionary) -> void:
 	assert(int(spec.get("max_cells", 64)) >= 1)
 	if int(spec.get("stop_population_at_least", 0)) > 0:
 		assert(int(spec.get("stop_population_at_least", 0)) <= int(spec.get("max_cells", 64)))
+	for intervention_variant in spec.get("interventions", []):
+		var intervention: Dictionary = intervention_variant
+		assert(String(intervention.get("kind", "")) == "serial_transfer")
+		assert(int(intervention.get("tick", -1)) >= 0)
+		assert(int(intervention.get("survivors", 0)) >= 1)
 
 static func _create_config(spec: Dictionary):
 	var config = SimConfigScript.new()
@@ -157,7 +214,9 @@ static func _sample(sim) -> Dictionary:
 		"population": sim.population_size(),
 		"total_biomass": sim.total_cell_volume(),
 		"max_generation": sim.maximum_generation(),
+		"generation_distribution": _generation_distribution(sim),
 		"genotype_count": sim.genotype_count(),
+		"genotype_frequencies": _genotype_frequencies(sim),
 		"mutation_events": sim.mutation_event_count(),
 		"division_events": _event_count(sim, "division"),
 		"death_causes": _death_causes(sim),
@@ -165,6 +224,55 @@ static func _sample(sim) -> Dictionary:
 		"cell_diagnostics": _cell_diagnostics(sim),
 		"checksum": sim.checksum()
 	}
+
+static func _apply_interventions(sim, tick: int, interventions: Array, seed: int, log: Array) -> void:
+	for intervention_variant in interventions:
+		var intervention: Dictionary = intervention_variant
+		if int(intervention.get("tick", -1)) != tick:
+			continue
+		match String(intervention.get("kind", "")):
+			"serial_transfer":
+				var survivors: int = int(intervention.get("survivors", 1))
+				var before: int = sim.population_size()
+				if before <= survivors:
+					log.append({"tick": tick, "kind": "serial_transfer", "before": before, "after": before, "removed_ids": []})
+					continue
+				var ranked: Array = []
+				for cell in sim.cells:
+					ranked.append({"rank": _intervention_rank(seed, tick, int(cell.id)), "cell": cell})
+				ranked.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+					if int(a["rank"]) == int(b["rank"]):
+						return int(a["cell"].id) < int(b["cell"].id)
+					return int(a["rank"]) < int(b["rank"])
+				)
+				var kept: Array = []
+				var removed_ids: Array = []
+				for i in range(ranked.size()):
+					if i < survivors:
+						kept.append(ranked[i]["cell"])
+					else:
+						removed_ids.append(int(ranked[i]["cell"].id))
+				sim.cells = kept
+				log.append({"tick": tick, "kind": "serial_transfer", "before": before, "after": kept.size(), "removed_ids": removed_ids})
+
+static func _intervention_rank(seed: int, tick: int, cell_id: int) -> int:
+	var value: int = (seed ^ (tick * 1103515245) ^ (cell_id * 2654435761)) & 0x7fffffff
+	value = (value * 1664525 + 1013904223) & 0x7fffffff
+	return value
+
+static func _genotype_frequencies(sim) -> Dictionary:
+	var counts: Dictionary = {}
+	for cell in sim.cells:
+		var key: String = str(cell.genome.fingerprint())
+		counts[key] = int(counts.get(key, 0)) + 1
+	return counts
+
+static func _generation_distribution(sim) -> Dictionary:
+	var counts: Dictionary = {}
+	for cell in sim.cells:
+		var key: String = str(int(cell.generation))
+		counts[key] = int(counts.get(key, 0)) + 1
+	return counts
 
 static func _cell_diagnostics(sim) -> Dictionary:
 	var population: int = sim.population_size()
