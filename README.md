@@ -14,13 +14,13 @@ The project deliberately separates **digital physics/chemistry** from **evolvabl
 6. **Observability.** Important births, deaths, mutations, lineage changes and interventions must be reconstructable.
 7. **Small world, deep biology.** Initial scope is a microchamber with tens of cells and a deliberately compressed biochemical model.
 
-## Current vertical slice: M0-M2
+## Current vertical slice: M0-M3
 
-The foundation branch establishes the causal chain:
+The implemented causal foundation is:
 
-`environmental nutrient -> membrane uptake -> metabolism -> ATP -> maintenance/repair/biomass -> growth -> division`
+`environmental nutrient -> membrane uptake -> metabolism -> ATP -> maintenance/repair/biomass -> growth -> division -> inherited genome -> mutation`
 
-Implemented foundation components:
+Current components:
 
 - closed 2D microchamber;
 - glucose and oxygen diffusion;
@@ -31,12 +31,19 @@ Implemented foundation components:
 - maintenance, energetic debt, ROS, damage and repair;
 - precursor-dependent biomass growth;
 - division into two new daughter identities with stochastic partitioning;
-- lineage events;
+- explicit 12-locus heritable genome;
+- deep-copy inheritance with no sibling/ancestor aliasing;
+- promoter-code, protein-signature and neutral-marker mutations;
+- deterministic mutation event history with genotype fingerprints;
 - deterministic seeded RNG and whole-state checksum;
-- time-control observer UI;
-- headless invariant tests.
+- genotype-diversity/mutation counters in the observer UI;
+- headless invariant/statistical tests.
 
-Fixed ancestral trait scales in M0-M2 are scaffolding only. They are replaced by inherited genome/proteome mechanisms beginning in M3-M5.
+### Important M3 boundary
+
+The M3 genome is **heritable but intentionally not yet adaptive**. Promoter and protein-signature mutations are molecular information only. Basal physiology still uses transitional fixed scales from M0-M2.
+
+M4 gives protein signatures functional meaning through a validated catalytic-affinity/reaction landscape. M5 gives promoters and regulatory motifs functional meaning through costly gene expression and regulation. This staged design lets us prove inheritance and neutral evolution before introducing selection on molecular function.
 
 ## Requirements
 
@@ -57,7 +64,7 @@ Controls:
 - `4`: 1000x;
 - `5`: 5000x.
 
-The initial renderer shows the extracellular glucose field, cells, virtual time, population, generation, resource totals, event count, seed and deterministic state checksum.
+The renderer currently shows the extracellular glucose field, cells, virtual time, population, generation, live genotype count, mutation-event count, resource totals, seed and deterministic state checksum.
 
 ## Headless validation
 
@@ -66,10 +73,11 @@ godot --headless --editor --path . --quit
 godot --headless --path . --script tests/run_tests.gd
 ```
 
-The current tests verify diffusion conservation/nonnegativity, fair allocation of a scarce shared resource, resource-supported division, starvation death and same-seed reproducibility.
+Tests cover numerical conservation, fair simultaneous competition, division accounting, starvation death, exact same-seed history, genome deep-copy inheritance, parental/sibling immutability, exact mutation replay, seed-contingent mutation history, neutral-marker physiology, configured mutation frequency and mutation ancestry records.
 
 ## Documentation
 
 - `docs/ARCHITECTURE.md` — system boundaries, tick semantics, target genome/protein/chemistry architecture, persistence, analytics and performance rules.
 - `docs/SCIENTIFIC_MODEL.md` — biological abstractions, equations, assumptions, limitations and validation hierarchy.
+- `docs/M3_GENETICS.md` — exact M3 gene/genome representation, inheritance, mutation semantics, neutrality gate and M4/M5 bridge.
 - `docs/ROADMAP.md` — gate-driven implementation from M0 through open evolution, laboratory tooling, evolved mutation rate, motility/information and horizontal transfer.
