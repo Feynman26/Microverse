@@ -82,7 +82,8 @@ func seed_ancestor(position: Vector2 = Vector2(-1.0, -1.0)):
 		"parent_id": -1,
 		"generation": 0,
 		"genotype_fingerprint": cell.genome.fingerprint(),
-		"genome_size": cell.genome.gene_count()
+		"genome_size": cell.genome.gene_count(),
+		"resident_genome_nuc_material": DNAReplicationScript.genome_nuc_material(cell.genome, config)
 	})
 	return cell
 
@@ -365,6 +366,8 @@ func _process_deaths() -> void:
 			"reason": cell.death_reason,
 			"genotype_fingerprint": cell.genome.fingerprint() if cell.genome != null else -1,
 			"genome_size": cell.genome.gene_count() if cell.genome != null else 0,
+			"resident_genome_nuc_material": DNAReplicationScript.genome_nuc_material(cell.genome, config) if cell.genome != null else 0.0,
+			"partial_copy_nuc_material": float(cell.replication_nuc_spent),
 			"released_pools": released
 		})
 	cells = survivors
@@ -392,9 +395,21 @@ func _process_divisions() -> void:
 			for daughter in daughters:
 				var mutation_result: Dictionary
 				if bool(config.evolvable_replication_enabled):
-					mutation_result = mutation_engine.mutate_replicated_copy(daughter.genome, rng, config, replication_profile)
+					mutation_result = mutation_engine.mutate_replicated_copy(
+						daughter.genome,
+						rng,
+						config,
+						replication_profile,
+						daughter.pool("NUC")
+					)
 				else:
 					mutation_result = mutation_engine.mutate_copy(daughter.genome, rng, config)
+				var dna_nuc_material_delta: float = float(mutation_result.get("dna_nuc_material_delta", 0.0))
+				if dna_nuc_material_delta > 0.0:
+					assert(daughter.pool("NUC") + 1e-12 >= dna_nuc_material_delta, "Structural expansion exceeded newborn nucleotide budget")
+					daughter.set_pool("NUC", maxf(0.0, daughter.pool("NUC") - dna_nuc_material_delta))
+				elif dna_nuc_material_delta < 0.0:
+					MetabolicSolverScript.add_pool(daughter.metabolites, "NUC", -dna_nuc_material_delta)
 				daughter.genome = mutation_result["genome"]
 				# Structural mutation changes DNA only. New loci must begin without
 				# magically manufactured molecular products, while deleted-locus
@@ -407,6 +422,8 @@ func _process_divisions() -> void:
 					"generation": daughter.generation,
 					"genotype_fingerprint": daughter_fingerprint,
 					"genome_size": daughter.genome.gene_count(),
+					"resident_genome_nuc_material": DNAReplicationScript.genome_nuc_material(daughter.genome, config),
+					"structural_mutation_nuc_delta": dna_nuc_material_delta,
 					"point_error_rate_per_gene": float(replication_profile.get("point_error_rate_per_gene", -1.0)) if bool(config.evolvable_replication_enabled) else -1.0,
 					"structural_error_rate_per_genome": float(replication_profile.get("structural_error_rate_per_genome", -1.0)) if bool(config.evolvable_replication_enabled) else -1.0
 				})
