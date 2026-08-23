@@ -3,10 +3,12 @@ class_name ReactionCatalog
 
 const ReactionDefinitionScript = preload("res://src/chemistry/reaction_definition.gd")
 
-# Candidate M4 network. Signatures are deliberately positioned relative to the
-# M3 ancestor so core reactions begin strongly accessible while alternative
-# waste-recovery routes sit just outside the active affinity radius. The
-# landscape probe must validate this arrangement before physiology depends on it.
+# M4 network. Signatures are deliberately positioned relative to the M3
+# ancestor. Core reactions have exact catalytic matches; alternative routes are
+# weak or dormant. R05 and R11 are genome-wide dormant in the ancestor and sit
+# exactly one coding mutation outside the active radius of their designated
+# precursor loci. R12 converts chemically explicit precursors into BIO so cell
+# volume can become a consequence of metabolism.
 
 static func create_m4_candidate() -> Array:
 	return [
@@ -60,10 +62,19 @@ static func create_m4_candidate() -> Array:
 			{"C3": 1.0, "NADH": 1.0},
 			{"W2": 1.0, "NAD": 1.0}, 0.6
 		),
+		# 0x900A is distance 5 from ancestral locus 9 and >= 5 from every
+		# other ancestral protein. This fixes a subtle M4-A issue where R11's
+		# designated locus was dormant but promiscuous activity from loci 3/10
+		# made the reaction genome-wide active.
 		ReactionDefinitionScript.new(
-			"R11", "waste_2_oxidative_recovery", 0x9E1C,
+			"R11", "waste_2_oxidative_recovery", 0x900A,
 			{"W2": 1.0, "O2": 1.0, "ADP": 1.0},
 			{"C2": 1.0, "CO2": 1.0, "ATP": 1.0, "ROS": 1.0}, 0.7
+		),
+		ReactionDefinitionScript.new(
+			"R12", "structural_biomass_assembly", 0xAF14,
+			{"AA": 2.0, "LIP": 1.0, "NUC": 2.0, "ATP": 2.0},
+			{"BIO": 1.0, "ADP": 2.0}, 0.8
 		)
 	]
 
