@@ -9,6 +9,19 @@ const MetabolicSolverScript = preload("res://src/chemistry/metabolic_solver.gd")
 # gifting the ancestor a repair phenotype.
 const REPAIR_TARGET_SIGNATURE: int = 0xD15A
 
+# One resident chromosome is physical nucleotide material even though its
+# sequence is represented compactly as genes/cis regions. The initial founder's
+# chromosome is part of its constructed initial state; subsequent second copies
+# are paid incrementally through replication_nuc_spent. Keeping this derivable
+# from genome architecture avoids a second mutable source of truth.
+static func genome_nuc_material(genome, config) -> float:
+	assert(genome != null)
+	return maxf(0.0, float(genome.replication_unit_count()) * float(config.genome_replication_nuc_cost_per_gene))
+
+static func total_cell_dna_nuc_material(cell, config) -> float:
+	assert(cell.genome != null)
+	return genome_nuc_material(cell.genome, config) + maxf(0.0, float(cell.replication_nuc_spent))
+
 static func step(cell, dt: float, config) -> Dictionary:
 	assert(dt >= 0.0)
 	assert(cell.genome != null)
@@ -144,5 +157,7 @@ static func _summary(cell, copied: float, atp_spent: float, nuc_spent: float, re
 		"repair_activity_this_tick": repair,
 		"mean_repair_activity": mean_repair_activity(cell),
 		"cumulative_atp_spent": float(cell.replication_atp_spent),
-		"cumulative_nuc_spent": float(cell.replication_nuc_spent)
+		"cumulative_nuc_spent": float(cell.replication_nuc_spent),
+		"resident_genome_nuc_material": genome_nuc_material(cell.genome, config),
+		"total_dna_nuc_material": total_cell_dna_nuc_material(cell, config)
 	}
