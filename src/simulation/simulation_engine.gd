@@ -7,6 +7,8 @@ const WorldStateScript = preload("res://src/world/world_state.gd")
 const CellStateScript = preload("res://src/biology/cell_state.gd")
 const GenomeScript = preload("res://src/genetics/genome.gd")
 const MutationEngineScript = preload("res://src/genetics/mutation_engine.gd")
+const DNAReplicationScript = preload("res://src/genetics/dna_replication.gd")
+const ExpressionSystemScript = preload("res://src/expression/expression_system.gd")
 const MetaboliteCatalogScript = preload("res://src/chemistry/metabolite_catalog.gd")
 const MetabolicSolverScript = preload("res://src/chemistry/metabolic_solver.gd")
 const ReactionCatalogScript = preload("res://src/chemistry/reaction_catalog.gd")
@@ -79,7 +81,8 @@ func seed_ancestor(position: Vector2 = Vector2(-1.0, -1.0)):
 		"cell_id": cell.id,
 		"parent_id": -1,
 		"generation": 0,
-		"genotype_fingerprint": cell.genome.fingerprint()
+		"genotype_fingerprint": cell.genome.fingerprint(),
+		"genome_size": cell.genome.gene_count()
 	})
 	return cell
 
@@ -361,6 +364,7 @@ func _process_deaths() -> void:
 			"generation": cell.generation,
 			"reason": cell.death_reason,
 			"genotype_fingerprint": cell.genome.fingerprint() if cell.genome != null else -1,
+			"genome_size": cell.genome.gene_count() if cell.genome != null else 0,
 			"released_pools": released
 		})
 	cells = survivors
@@ -372,24 +376,39 @@ func _process_divisions() -> void:
 		if not cell.alive:
 			continue
 		if cell.ready_to_divide(config) and projected_population < int(config.max_cells):
+			var parent_fingerprint: int = int(cell.genome.fingerprint())
+			var parent_genome_size: int = int(cell.genome.gene_count())
+			var replication_profile: Dictionary = DNAReplicationScript.mutation_profile(cell, config)
 			var daughters: Array = cell.create_daughters(_allocate_cell_id(), _allocate_cell_id(), tick_index, rng, world, config)
 			projected_population += 1
 			_record_event("division", {
 				"parent_id": cell.id,
-				"parent_genotype_fingerprint": cell.genome.fingerprint() if cell.genome != null else -1,
+				"parent_genotype_fingerprint": parent_fingerprint,
+				"parent_genome_size": parent_genome_size,
 				"daughter_ids": [daughters[0].id, daughters[1].id],
-				"generation": cell.generation + 1
+				"generation": cell.generation + 1,
+				"replication_profile": replication_profile.duplicate(true)
 			})
 			for daughter in daughters:
-				var parent_fingerprint: int = int(cell.genome.fingerprint())
-				var mutation_result: Dictionary = mutation_engine.mutate_copy(daughter.genome, rng, config)
+				var mutation_result: Dictionary
+				if bool(config.evolvable_replication_enabled):
+					mutation_result = mutation_engine.mutate_replicated_copy(daughter.genome, rng, config, replication_profile)
+				else:
+					mutation_result = mutation_engine.mutate_copy(daughter.genome, rng, config)
 				daughter.genome = mutation_result["genome"]
+				# Structural mutation changes DNA only. New loci must begin without
+				# magically manufactured molecular products, while deleted-locus
+				# proteins inherited from the mother remain physical until decay.
+				ExpressionSystemScript.reconcile_state_with_genome(daughter.expression_state, daughter.genome)
 				var daughter_fingerprint: int = int(daughter.genome.fingerprint())
 				_record_event("birth", {
 					"cell_id": daughter.id,
 					"parent_id": cell.id,
 					"generation": daughter.generation,
-					"genotype_fingerprint": daughter_fingerprint
+					"genotype_fingerprint": daughter_fingerprint,
+					"genome_size": daughter.genome.gene_count(),
+					"point_error_rate_per_gene": float(replication_profile.get("point_error_rate_per_gene", -1.0)) if bool(config.evolvable_replication_enabled) else -1.0,
+					"structural_error_rate_per_genome": float(replication_profile.get("structural_error_rate_per_genome", -1.0)) if bool(config.evolvable_replication_enabled) else -1.0
 				})
 				for raw_event in mutation_result["events"]:
 					var mutation_payload: Dictionary = raw_event.duplicate(true)
@@ -399,6 +418,9 @@ func _process_divisions() -> void:
 					mutation_payload["generation"] = daughter.generation
 					mutation_payload["parent_genotype_fingerprint"] = parent_fingerprint
 					mutation_payload["resulting_genotype_fingerprint"] = daughter_fingerprint
+					mutation_payload["parent_genome_size"] = parent_genome_size
+					mutation_payload["resulting_genome_size"] = daughter.genome.gene_count()
+					mutation_payload["mean_repair_activity"] = float(replication_profile.get("mean_repair_activity", 0.0))
 					_record_event("mutation", mutation_payload)
 			next_population.append_array(daughters)
 		else:
