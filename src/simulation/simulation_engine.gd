@@ -104,10 +104,6 @@ func _process_deaths() -> void:
 		if cell.alive:
 			survivors.append(cell)
 			continue
-		if cell.death_reason == "division":
-			# Division parents are removed in _process_divisions instead.
-			survivors.append(cell)
-			continue
 		var pools: Dictionary = cell.releasable_pools()
 		world.release("glucose", cell.position, float(pools["glucose"]))
 		world.release("oxygen", cell.position, float(pools["oxygen"]))
@@ -124,7 +120,6 @@ func _process_divisions() -> void:
 
 	for cell in cells:
 		if not cell.alive:
-			# Normally unreachable here except future lifecycle extensions.
 			continue
 		if cell.ready_to_divide(config) and projected_population < config.max_cells:
 			var daughters: Array = cell.create_daughters(_allocate_cell_id(), _allocate_cell_id(), tick_index, rng, world, config)
@@ -134,6 +129,12 @@ func _process_divisions() -> void:
 				"daughter_ids": [daughters[0].id, daughters[1].id],
 				"generation": cell.generation + 1
 			})
+			for daughter in daughters:
+				_record_event("birth", {
+					"cell_id": daughter.id,
+					"parent_id": cell.id,
+					"generation": daughter.generation
+				})
 			next_population.append_array(daughters)
 		else:
 			next_population.append(cell)
