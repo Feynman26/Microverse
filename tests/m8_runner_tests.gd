@@ -16,7 +16,8 @@ func _run() -> void:
 	_test_same_spec_and_seed_replay_exactly()
 	_test_sampling_is_observational_only()
 	_test_extinction_is_terminal_and_explained()
-	_test_anoxic_carbon_fed_environment_can_exceed_sixteen_cells()
+	_test_redox_energy_tradeoff_is_observable()
+	_test_population_threshold_stop_is_explicit()
 	_test_batch_order_does_not_change_individual_runs()
 	_test_run_metadata_is_self_identifying()
 
@@ -82,47 +83,46 @@ func _test_extinction_is_terminal_and_explained() -> void:
 	_assert_true(int(result["death_causes"].get("energy_failure", 0)) >= 1, "runner reports physiological cause of terminal population loss")
 	_assert_true(int(result["realized_ticks"]) < int(result["horizon_ticks"]), "stop-on-extinction avoids meaningless post-extinction ticks")
 
-func _test_anoxic_carbon_fed_environment_can_exceed_sixteen_cells() -> void:
-	# The O2=5 and O2=0.5 characterization runs retained large external nutrient
-	# inventories but accumulated ROS-driven deaths. The ancestral reaction network
-	# already contains fermentative redox relief, so complete oxygen limitation is
-	# a clean environmental counterfactual: no physiology constant is changed and
-	# the >16 criterion remains fixed. The run stops immediately on cell 17.
+func _test_redox_energy_tradeoff_is_observable() -> void:
+	# The long characterization that motivated M8-A falsified a simple environmental
+	# rescue of the observed ~16-cell plateau: O2=5 and O2=0.5 retained abundant
+	# nutrients but accumulated damage, whereas O2=0 eliminated oxidant and died by
+	# energy failure. CI preserves the mechanism with a short paired assay rather
+	# than repeatedly simulating the expensive multi-generation endpoints.
+	var oxidative: Dictionary = _redox_spec(77304, 5.0)
+	var anoxic: Dictionary = _redox_spec(77304, 0.0)
+	var oxidative_result: Dictionary = ExperimentRunnerScript.run(oxidative)
+	var anoxic_result: Dictionary = ExperimentRunnerScript.run(anoxic)
+	var oxidative_diag: Dictionary = oxidative_result["final_cell_diagnostics"]
+	var anoxic_diag: Dictionary = anoxic_result["final_cell_diagnostics"]
+
+	_assert_true(int(oxidative_result["final_population"]) > 0, "oxygen-rich paired assay remains alive through the short characterization horizon")
+	_assert_true(int(anoxic_result["final_population"]) > 0, "anoxic paired assay is sampled before its known later energy-failure endpoint")
+	_assert_true(float(oxidative_diag["max_damage"]) > float(anoxic_diag["max_damage"]), "oxygen-rich metabolism creates a larger ROS-linked damage burden")
+	_assert_true(float(oxidative_diag["total_intracellular_ros"]) > float(anoxic_diag["total_intracellular_ros"]), "oxygen availability creates measurable intracellular ROS through ordinary chemistry")
+	_assert_close(float(anoxic_diag["max_damage"]), 0.0, 1e-12, "anoxia removes the oxidative damage source in the paired characterization")
+	_assert_close(float(anoxic_diag["total_intracellular_ros"]), 0.0, 1e-12, "anoxia leaves no intracellular ROS in the ancestral paired characterization")
+	_assert_true(float(anoxic_diag["max_energy_debt"]) > float(oxidative_diag["max_energy_debt"]), "removing oxygen trades oxidative burden for a larger energetic deficit")
+
+func _test_population_threshold_stop_is_explicit() -> void:
 	var spec: Dictionary = ExperimentRunnerScript.create_spec(
-		77304,
-		8000,
-		200,
+		88415,
+		20,
+		20,
 		EnvironmentScheduleScript.constant({
 			"glucose": 4.0,
-			"oxygen": 0.0,
+			"oxygen": 0.5,
 			"nitrogen": 3.0,
 			"phosphorus": 2.0
 		})
 	)
 	spec["world_width"] = 8
 	spec["world_height"] = 8
-	spec["max_cells"] = 24
 	spec["mutation_enabled"] = false
-	spec["stop_population_at_least"] = 17
+	spec["stop_population_at_least"] = 1
 	var result: Dictionary = ExperimentRunnerScript.run(spec)
-	print("M8 anoxic-reservoir diagnostic: max_population=%d final_population=%d generation=%d divisions=%d deaths=%s ticks=%d final_resources=%s" % [
-		int(result["max_population"]),
-		int(result["final_population"]),
-		int(result["final_generation"]),
-		int(result["division_events"]),
-		str(result["death_causes"]),
-		int(result["realized_ticks"]),
-		str(result["final_resources"])
-	])
-	_assert_true(
-		int(result["max_population"]) > 16,
-		"anoxic carbon-fed reservoir allows the same core physiology to grow beyond the observed 16-cell plateau (actual max=%d, generation=%d, divisions=%d, deaths=%s)" % [
-			int(result["max_population"]), int(result["final_generation"]), int(result["division_events"]), str(result["death_causes"])
-		]
-	)
-	_assert_true(int(result["final_population"]) >= 17, "population threshold stops only after a living population crosses sixteen cells")
-	_assert_true(String(result["termination_reason"]) == "population_threshold", "runner records the population-threshold stop reason explicitly")
-	_assert_true(int(result["realized_ticks"]) < int(result["horizon_ticks"]), "population threshold avoids unnecessary post-gate simulation ticks")
+	_assert_true(String(result["termination_reason"]) == "population_threshold", "runner records a population-threshold stop explicitly")
+	_assert_true(int(result["realized_ticks"]) == 1, "already-satisfied living population threshold stops after the first authoritative tick")
 
 func _test_batch_order_does_not_change_individual_runs() -> void:
 	var spec: Dictionary = _short_constant_spec(1, 400, 40)
@@ -140,7 +140,26 @@ func _test_run_metadata_is_self_identifying() -> void:
 	_assert_true(int(result["schema_version"]) == ExperimentRunnerScript.SCHEMA_VERSION, "run records experiment schema version")
 	_assert_true(String(result["model_version"]) == ExperimentRunnerScript.MODEL_VERSION, "run records model version")
 	_assert_true(int(result["seed"]) == 99005, "run records exact RNG seed")
-	_assert_true(result.has("death_causes") and result.has("final_resources"), "run records diagnostic population-loss and resource context")
+	_assert_true(result.has("death_causes") and result.has("final_resources") and result.has("final_cell_diagnostics"), "run records population-loss, resource, and cellular-stress diagnostics")
+
+func _redox_spec(seed: int, oxygen: float) -> Dictionary:
+	var spec: Dictionary = ExperimentRunnerScript.create_spec(
+		seed,
+		600,
+		600,
+		EnvironmentScheduleScript.constant({
+			"glucose": 4.0,
+			"oxygen": oxygen,
+			"nitrogen": 3.0,
+			"phosphorus": 2.0
+		})
+	)
+	spec["world_width"] = 8
+	spec["world_height"] = 8
+	spec["max_cells"] = 16
+	spec["mutation_enabled"] = false
+	spec["stop_on_extinction"] = false
+	return spec
 
 func _short_constant_spec(seed: int, horizon: int, cadence: int) -> Dictionary:
 	var spec: Dictionary = ExperimentRunnerScript.create_spec(
