@@ -34,29 +34,39 @@ func _init(p_id: int = 0, p_parent_id: int = -1, p_generation: int = 0, p_birth_
 	position = p_position
 	volume = p_volume
 
-func step(dt: float, world, config) -> void:
+# Transport is split into request/allocation/application phases by the engine.
+# That avoids a hidden fitness advantage for whichever cell happens to be
+# iterated first when several cells compete for the same finite grid resource.
+func transport_requests(dt: float, world, config) -> Dictionary:
+	if not alive:
+		return {"glucose": 0.0, "oxygen": 0.0}
+
+	var local_glucose: float = world.sample("glucose", position)
+	var glucose_rate := config.glucose_transport_vmax * glucose_transport_scale * local_glucose / (config.glucose_transport_km + local_glucose)
+	var glucose_capacity := maxf(0.0, config.intracellular_pool_capacity_per_volume * volume - internal_glucose)
+	var requested_glucose := minf(glucose_rate * dt, glucose_capacity)
+
+	var local_oxygen: float = world.sample("oxygen", position)
+	var oxygen_rate := config.oxygen_transport_vmax * oxygen_transport_scale * local_oxygen / (config.oxygen_transport_km + local_oxygen)
+	var oxygen_capacity := maxf(0.0, config.intracellular_pool_capacity_per_volume * volume - internal_oxygen)
+	var requested_oxygen := minf(oxygen_rate * dt, oxygen_capacity)
+
+	return {"glucose": requested_glucose, "oxygen": requested_oxygen}
+
+func apply_uptake(glucose_amount: float, oxygen_amount: float) -> void:
+	assert(glucose_amount >= 0.0 and oxygen_amount >= 0.0)
+	internal_glucose += glucose_amount
+	internal_oxygen += oxygen_amount
+
+func step_intracellular(dt: float, config) -> void:
 	if not alive:
 		return
-	_transport(dt, world, config)
 	_metabolize(dt, config)
 	_pay_maintenance(dt, config)
 	_update_damage_and_repair(dt, config)
 	_grow(dt, config)
 	_check_viability(config)
 	_assert_state()
-
-func _transport(dt: float, world, config) -> void:
-	var local_glucose: float = world.sample("glucose", position)
-	var glucose_rate := config.glucose_transport_vmax * glucose_transport_scale * local_glucose / (config.glucose_transport_km + local_glucose)
-	var glucose_capacity := maxf(0.0, config.intracellular_pool_capacity_per_volume * volume - internal_glucose)
-	var requested_glucose := minf(glucose_rate * dt, glucose_capacity)
-	internal_glucose += world.consume("glucose", position, requested_glucose)
-
-	var local_oxygen: float = world.sample("oxygen", position)
-	var oxygen_rate := config.oxygen_transport_vmax * oxygen_transport_scale * local_oxygen / (config.oxygen_transport_km + local_oxygen)
-	var oxygen_capacity := maxf(0.0, config.intracellular_pool_capacity_per_volume * volume - internal_oxygen)
-	var requested_oxygen := minf(oxygen_rate * dt, oxygen_capacity)
-	internal_oxygen += world.consume("oxygen", position, requested_oxygen)
 
 func _metabolize(dt: float, config) -> void:
 	var catalytic_limit := config.respiration_vmax * respiration_scale * volume * dt
