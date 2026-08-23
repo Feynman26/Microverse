@@ -87,4 +87,7 @@ jobs:
       - name: Validate M7 reciprocal cross-feeding
         run: godot --headless --path . --script tests/m7_reciprocal_cross_feeding_tests.gd
 
+      - name: Validate M7 extracellular public good and exploitation
+        run: godot --headless --path . --script tests/m7_public_good_tests.gd
+
       # Frozen M5-C reproductive panels remain research evidence, not CI gates.

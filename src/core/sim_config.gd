@@ -67,6 +67,17 @@ var secondary_transport_vmax_per_reference_protein: float = 0.40
 var secondary_transport_gradient_km: float = 0.50
 var secondary_transport_atp_cost_per_unit: float = 0.02
 
+# M7-E generic protein secretion and extracellular catalysis. A protein must
+# carry the sequence-level secretion motif before any of its realized molecules
+# can leave the cell. Secretion removes those exact protein molecules and spends
+# ATP. Extracellular protein diffuses slowly and catalyses only reactions for
+# which its sequence has ordinary Hamming-distance affinity.
+var extracellular_protein_diffusion: float = 0.08
+var extracellular_protein_secretion_fraction_per_min: float = 0.20
+var extracellular_protein_secretion_atp_cost_per_unit: float = 0.01
+var extracellular_catalysis_rate_scale: float = 1.00
+var extracellular_catalysis_km: float = 0.25
+
 var metabolic_substeps_per_tick: int = 6
 var metabolic_km_per_volume: float = 0.20
 var metabolic_rate_scale: float = 0.85
@@ -183,6 +194,12 @@ func validate() -> void:
 	assert(secondary_transport_vmax_per_reference_protein >= 0.0)
 	assert(secondary_transport_gradient_km > 0.0)
 	assert(secondary_transport_atp_cost_per_unit >= 0.0)
+	assert(extracellular_protein_diffusion >= 0.0)
+	assert(extracellular_protein_diffusion * tick_dt_min / dx2 <= 0.25, "Unstable extracellular protein diffusion")
+	assert(extracellular_protein_secretion_fraction_per_min >= 0.0)
+	assert(extracellular_protein_secretion_atp_cost_per_unit >= 0.0)
+	assert(extracellular_catalysis_rate_scale >= 0.0)
+	assert(extracellular_catalysis_km > 0.0)
 	assert(metabolic_substeps_per_tick >= 1)
 	assert(metabolic_km_per_volume > 0.0 and metabolic_rate_scale > 0.0)
 	assert(biomass_units_per_volume > 0.0)

@@ -10,6 +10,8 @@ const MutationEngineScript = preload("res://src/genetics/mutation_engine.gd")
 const MetaboliteCatalogScript = preload("res://src/chemistry/metabolite_catalog.gd")
 const MetabolicSolverScript = preload("res://src/chemistry/metabolic_solver.gd")
 const ReactionCatalogScript = preload("res://src/chemistry/reaction_catalog.gd")
+const ExtracellularReactionCatalogScript = preload("res://src/chemistry/extracellular_reaction_catalog.gd")
+const ExtracellularCatalysisScript = preload("res://src/chemistry/extracellular_catalysis.gd")
 const MembraneTransportScript = preload("res://src/transport/membrane_transport.gd")
 const CellMechanicsScript = preload("res://src/physics/cell_mechanics.gd")
 
@@ -22,6 +24,7 @@ var rng
 var world
 var mutation_engine
 var reactions: Array = []
+var extracellular_reactions: Array = []
 var cells: Array = []
 var tick_index: int = 0
 var simulation_time_min: float = 0.0
@@ -30,6 +33,8 @@ var next_mutation_id: int = 1
 var event_log: Array = []
 var last_mechanics_summary: Dictionary = {}
 var last_secondary_transport_summary: Dictionary = {}
+var last_protein_secretion_summary: Dictionary = {}
+var last_extracellular_catalysis_summary: Dictionary = {}
 
 func _init(p_config = null) -> void:
 	config = p_config if p_config != null else SimConfigScript.new()
@@ -38,6 +43,8 @@ func _init(p_config = null) -> void:
 	mutation_engine = MutationEngineScript.new()
 	reactions = ReactionCatalogScript.create_m4_candidate()
 	ReactionCatalogScript.validate_unique(reactions)
+	extracellular_reactions = ExtracellularReactionCatalogScript.create_m7_candidate()
+	ExtracellularReactionCatalogScript.validate_unique(extracellular_reactions)
 	world = WorldStateScript.new(config.world_width, config.world_height, config.grid_cell_size_um)
 	_register_extracellular_fields()
 
@@ -86,7 +93,13 @@ func _step_once() -> void:
 	world.diffuse(dt)
 	_allocate_membrane_transport(dt)
 	last_secondary_transport_summary = _allocate_secondary_membrane_transport(dt)
+	last_protein_secretion_summary = _secrete_extracellular_proteins(dt)
+	last_extracellular_catalysis_summary = ExtracellularCatalysisScript.step(world, extracellular_reactions, dt, config)
 
+	# Extracellular products are created after membrane allocation, so another
+	# cell cannot consume a just-created public molecule at zero elapsed time.
+	# It becomes available to transport on the next simulation tick after the
+	# ordinary diffusion phase has had a chance to establish spatial structure.
 	for cell in cells:
 		if cell.alive:
 			cell.step_intracellular(dt, config, reactions, rng)
@@ -275,6 +288,53 @@ func _allocate_secondary_membrane_transport(dt: float) -> Dictionary:
 	return {
 		"by_cell": by_cell,
 		"total_moved": total_moved,
+		"total_atp_spent": total_atp_spent
+	}
+
+# M7-E protein secretion is sequence-derived and acts on realized protein
+# cohorts. Every actual secreted molecule is removed from the intracellular
+# proteome, deposited into an extracellular sequence-specific field, and paid
+# for with ATP. ATP scarcity scales all simultaneously secreted signatures from
+# one cell proportionally.
+func _secrete_extracellular_proteins(dt: float) -> Dictionary:
+	var by_cell: Dictionary = {}
+	var total_secreted: float = 0.0
+	var total_atp_spent: float = 0.0
+
+	for cell in cells:
+		if not cell.alive:
+			continue
+		var proposals: Dictionary = ExtracellularCatalysisScript.secretion_proposals(cell.expression_state, dt, config)
+		var energy_scale: float = ExtracellularCatalysisScript.secretion_energy_scale(proposals, cell.pool("ATP"), config)
+		var actual_by_signature: Dictionary = {}
+		var secreted: float = 0.0
+		var signatures: Array = proposals.keys()
+		signatures.sort()
+		for signature_variant in signatures:
+			var signature: int = int(signature_variant)
+			var requested: float = maxf(0.0, float(proposals[signature_variant]) * energy_scale)
+			var removed: float = ExtracellularCatalysisScript.remove_protein_signature(cell.expression_state, signature, requested)
+			assert(absf(removed - requested) <= 1e-9, "Protein secretion proposal exceeded realized cohort")
+			if removed > 0.0:
+				world.release_protein(signature, cell.position, removed, float(config.extracellular_protein_diffusion))
+			actual_by_signature[signature] = removed
+			secreted += removed
+
+		var cost: float = secreted * float(config.extracellular_protein_secretion_atp_cost_per_unit)
+		var spent: float = MetabolicSolverScript.spend_atp(cell.metabolites, cost)
+		assert(absf(spent - cost) <= 1e-9, "ATP pre-scaling failed to fund protein secretion")
+		total_secreted += secreted
+		total_atp_spent += spent
+		by_cell[int(cell.id)] = {
+			"secreted": actual_by_signature,
+			"total_secreted": secreted,
+			"energy_scale": energy_scale,
+			"atp_spent": spent
+		}
+
+	return {
+		"by_cell": by_cell,
+		"total_secreted": total_secreted,
 		"total_atp_spent": total_atp_spent
 	}
 
