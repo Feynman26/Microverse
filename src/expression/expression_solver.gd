@@ -7,15 +7,15 @@ const MetaboliteCatalogScript = preload("res://src/chemistry/metabolite_catalog.
 
 static func initialize(genome, config):
 	var mrna: Dictionary = {}
-	var proteins: Dictionary = {}
+	var cohorts: Dictionary = {}
 	for gene in genome.genes:
 		var locus_id: int = int(gene.locus_id)
 		var basal: float = float(gene.promoter_strength())
 		var m_ss: float = basal * float(config.transcription_rate) / float(config.mrna_decay_rate)
 		var p_ss: float = m_ss * float(config.translation_rate) / float(config.protein_decay_rate)
 		mrna[locus_id] = m_ss
-		proteins[locus_id] = p_ss
-	var state = ExpressionStateScript.new(mrna, proteins)
+		cohorts[locus_id] = {int(gene.protein_signature): p_ss}
+	var state = ExpressionStateScript.new(mrna, cohorts)
 	state.assert_matches_genome(genome)
 	return state
 
@@ -26,34 +26,46 @@ static func step(state, genome, metabolites: Dictionary, dt: float, rng, config)
 	if dt <= 0.0:
 		return {"transcription": 0.0, "translation": 0.0, "atp_cost": 0.0, "nuc_committed": 0.0, "aa_committed": 0.0, "regulation": {}}
 
-	var old_mrna: Dictionary = state.mrna.duplicate(true)
-	var old_proteins: Dictionary = state.proteins.duplicate(true)
+	var old_state = state.deep_copy()
 	var metabolic_snapshot: Dictionary = metabolites.duplicate(true)
 	var transcription_requests: Dictionary = {}
 	var translation_requests: Dictionary = {}
 	var regulation: Dictionary = {}
 	var mrna_decay: Dictionary = {}
-	var protein_decay: Dictionary = {}
+	var cohort_decay: Dictionary = {} # locus -> {signature: decayed_amount}
 	var returned_nuc: float = 0.0
 	var returned_aa: float = 0.0
 
+	# All decay, regulation, and synthesis requests come from one immutable
+	# molecular snapshot. Material released by turnover can be reused within the
+	# interval but no locus receives priority from array order.
 	for gene in genome.genes:
 		var locus_id: int = int(gene.locus_id)
-		var m_old: float = float(old_mrna.get(locus_id, 0.0))
-		var p_old: float = float(old_proteins.get(locus_id, 0.0))
+		var m_old: float = old_state.mrna_for(locus_id)
 		var m_deg: float = minf(m_old, m_old * float(config.mrna_decay_rate) * dt)
-		var p_deg: float = minf(p_old, p_old * float(config.protein_decay_rate) * dt)
 		mrna_decay[locus_id] = m_deg
-		protein_decay[locus_id] = p_deg
 		returned_nuc += m_deg * float(config.nuc_cost_per_mrna_unit)
-		returned_aa += p_deg * float(config.aa_cost_per_protein_unit)
 
-		var regulation_factor: float = _regulation_factor(gene, genome, old_proteins, metabolic_snapshot, config)
+		var decay_for_locus: Dictionary = {}
+		var old_cohorts: Dictionary = old_state.protein_cohorts.get(locus_id, {})
+		for signature_variant in old_cohorts.keys():
+			var signature: int = int(signature_variant)
+			var p_old: float = float(old_cohorts[signature])
+			var p_deg: float = minf(p_old, p_old * float(config.protein_decay_rate) * dt)
+			decay_for_locus[signature] = p_deg
+			returned_aa += p_deg * float(config.aa_cost_per_protein_unit)
+		cohort_decay[locus_id] = decay_for_locus
+
+		var regulation_factor: float = _regulation_factor(gene, genome, old_state, metabolic_snapshot, config)
 		regulation[locus_id] = regulation_factor
 		var transcription_noise: float = _noise_multiplier(rng, float(config.expression_noise_fraction))
 		var translation_noise: float = _noise_multiplier(rng, float(config.expression_noise_fraction))
-		transcription_requests[locus_id] = maxf(0.0, float(config.transcription_rate) * float(gene.promoter_strength()) * regulation_factor * dt * transcription_noise)
-		translation_requests[locus_id] = maxf(0.0, float(config.translation_rate) * m_old * dt * translation_noise)
+		transcription_requests[locus_id] = maxf(0.0,
+			float(config.transcription_rate) * float(gene.promoter_strength()) * regulation_factor * dt * transcription_noise
+		)
+		translation_requests[locus_id] = maxf(0.0,
+			float(config.translation_rate) * m_old * dt * translation_noise
+		)
 
 	var total_transcription: float = _sum_values(transcription_requests)
 	var total_translation: float = _sum_values(translation_requests)
@@ -70,14 +82,21 @@ static func step(state, genome, metabolites: Dictionary, dt: float, rng, config)
 	var effective_translation: float = 0.0
 	for gene in genome.genes:
 		var locus_id: int = int(gene.locus_id)
-		var m_old: float = float(old_mrna.get(locus_id, 0.0))
-		var p_old: float = float(old_proteins.get(locus_id, 0.0))
-		var m_new: float = float(transcription_requests[locus_id]) * transcription_scale
-		var p_new: float = float(translation_requests[locus_id]) * translation_scale
-		state.mrna[locus_id] = maxf(0.0, m_old - float(mrna_decay[locus_id]) + m_new)
-		state.proteins[locus_id] = maxf(0.0, p_old - float(protein_decay[locus_id]) + p_new)
-		effective_transcription += m_new
-		effective_translation += p_new
+		state.mrna[locus_id] = maxf(0.0,
+			old_state.mrna_for(locus_id) - float(mrna_decay[locus_id]) + float(transcription_requests[locus_id]) * transcription_scale
+		)
+		effective_transcription += float(transcription_requests[locus_id]) * transcription_scale
+
+		var updated_cohorts: Dictionary = old_state.protein_cohorts.get(locus_id, {}).duplicate(true)
+		var decay_for_locus: Dictionary = cohort_decay[locus_id]
+		for signature_variant in decay_for_locus.keys():
+			var signature: int = int(signature_variant)
+			updated_cohorts[signature] = maxf(0.0, float(updated_cohorts.get(signature, 0.0)) - float(decay_for_locus[signature]))
+		var translated: float = float(translation_requests[locus_id]) * translation_scale
+		var encoded_signature: int = int(gene.protein_signature) & 0xFFFF
+		updated_cohorts[encoded_signature] = float(updated_cohorts.get(encoded_signature, 0.0)) + translated
+		state.protein_cohorts[locus_id] = updated_cohorts
+		effective_translation += translated
 
 	var atp_spent: float = effective_transcription * float(config.transcription_atp_cost_per_unit) + effective_translation * float(config.translation_atp_cost_per_unit)
 	var nuc_committed: float = effective_transcription * float(config.nuc_cost_per_mrna_unit)
@@ -103,43 +122,54 @@ static func partition(state, ratio: float, rng, config) -> Array:
 	assert(ratio > 0.0 and ratio < 1.0)
 	var first_mrna: Dictionary = {}
 	var second_mrna: Dictionary = {}
-	var first_proteins: Dictionary = {}
-	var second_proteins: Dictionary = {}
+	var first_cohorts: Dictionary = {}
+	var second_cohorts: Dictionary = {}
 	var loci: Array = state.mrna.keys()
 	loci.sort()
 	for locus_variant in loci:
 		var locus_id: int = int(locus_variant)
 		var jitter: float = float(config.expression_partition_jitter)
-		var local_ratio: float = clampf(ratio + float(rng.randf_range(-jitter, jitter)), 0.05, 0.95)
+		var m_ratio: float = clampf(ratio + float(rng.randf_range(-jitter, jitter)), 0.05, 0.95)
 		var m: float = state.mrna_for(locus_id)
-		var p: float = state.protein_for(locus_id)
-		first_mrna[locus_id] = m * local_ratio
+		first_mrna[locus_id] = m * m_ratio
 		second_mrna[locus_id] = m - float(first_mrna[locus_id])
-		first_proteins[locus_id] = p * local_ratio
-		second_proteins[locus_id] = p - float(first_proteins[locus_id])
-	return [ExpressionStateScript.new(first_mrna, first_proteins), ExpressionStateScript.new(second_mrna, second_proteins)]
+
+		var first_locus: Dictionary = {}
+		var second_locus: Dictionary = {}
+		var cohorts: Dictionary = state.protein_cohorts.get(locus_id, {})
+		var signatures: Array = cohorts.keys()
+		signatures.sort()
+		for signature_variant in signatures:
+			var signature: int = int(signature_variant)
+			var local_ratio: float = clampf(ratio + float(rng.randf_range(-jitter, jitter)), 0.05, 0.95)
+			var amount: float = float(cohorts[signature])
+			first_locus[signature] = amount * local_ratio
+			second_locus[signature] = amount - float(first_locus[signature])
+		first_cohorts[locus_id] = first_locus
+		second_cohorts[locus_id] = second_locus
+	return [ExpressionStateScript.new(first_mrna, first_cohorts), ExpressionStateScript.new(second_mrna, second_cohorts)]
 
 static func structural_totals(state, config) -> Dictionary:
 	var mrna_material: float = state.total_mrna() * float(config.nuc_cost_per_mrna_unit)
 	var protein_material: float = state.total_protein() * float(config.aa_cost_per_protein_unit)
 	return {"C": mrna_material * 2.0 + protein_material * 2.0, "N": mrna_material + protein_material, "P": mrna_material}
 
-static func _regulation_factor(target_gene, genome, protein_snapshot: Dictionary, metabolites: Dictionary, config) -> float:
+static func _regulation_factor(target_gene, genome, state_snapshot, metabolites: Dictionary, config) -> float:
 	if not bool(config.regulation_enabled):
 		return 1.0
 	var activator: float = 0.0
 	var repressor: float = 0.0
-	for regulator_gene in genome.genes:
-		var abundance: float = maxf(0.0, float(protein_snapshot.get(int(regulator_gene.locus_id), 0.0)))
-		if abundance <= 0.0:
-			continue
-		var distance: int = CatalyticLandscapeScript.hamming_distance(int(regulator_gene.protein_signature), int(target_gene.regulatory_signature))
+	for record_variant in state_snapshot.cohort_records():
+		var record: Dictionary = record_variant
+		var signature: int = int(record["signature"])
+		var abundance: float = maxf(0.0, float(record["amount"]))
+		var distance: int = CatalyticLandscapeScript.hamming_distance(signature, int(target_gene.regulatory_signature))
 		if distance > int(config.regulatory_max_distance):
 			continue
 		var affinity: float = exp(-float(config.regulatory_distance_decay) * float(distance))
-		var effective_abundance: float = abundance * _allosteric_factor(regulator_gene, metabolites, config)
+		var effective_abundance: float = abundance * _allosteric_factor(signature, metabolites, config)
 		var occupancy: float = effective_abundance * affinity
-		if (int(regulator_gene.protein_signature) & 0x8000) == 0:
+		if (signature & 0x8000) == 0:
 			activator += occupancy
 		else:
 			repressor += occupancy
@@ -147,11 +177,10 @@ static func _regulation_factor(target_gene, genome, protein_snapshot: Dictionary
 	var normalized: float = (activator - repressor) / (1.0 + total)
 	return clampf(1.0 + float(config.regulatory_gain) * normalized, float(config.regulatory_min_factor), float(config.regulatory_max_factor))
 
-static func _allosteric_factor(regulator_gene, metabolites: Dictionary, config) -> float:
+static func _allosteric_factor(protein_signature: int, metabolites: Dictionary, config) -> float:
 	if not bool(config.allostery_enabled):
 		return 1.0
 	var strongest_occupancy: float = 0.0
-	var protein_signature: int = int(regulator_gene.protein_signature)
 	for metabolite_id in MetaboliteCatalogScript.ids():
 		var amount: float = maxf(0.0, float(metabolites.get(metabolite_id, 0.0)))
 		if amount <= 0.0:
@@ -161,16 +190,12 @@ static func _allosteric_factor(regulator_gene, metabolites: Dictionary, config) 
 			continue
 		var affinity: float = exp(-float(config.allosteric_distance_decay) * float(distance))
 		var scaled_amount: float = amount * affinity
-		var km: float = float(config.allosteric_km_per_volume)
-		var occupancy: float = scaled_amount / (km + scaled_amount)
+		var occupancy: float = scaled_amount / (float(config.allosteric_km_per_volume) + scaled_amount)
 		strongest_occupancy = maxf(strongest_occupancy, occupancy)
 	if strongest_occupancy <= 0.0:
 		return 1.0
 	var direction: float = -1.0 if (protein_signature & 0x4000) != 0 else 1.0
-	return clampf(
-		1.0 + direction * float(config.allosteric_gain) * strongest_occupancy,
-		float(config.allosteric_min_factor), float(config.allosteric_max_factor)
-	)
+	return clampf(1.0 + direction * float(config.allosteric_gain) * strongest_occupancy, float(config.allosteric_min_factor), float(config.allosteric_max_factor))
 
 static func _noise_multiplier(rng, fraction: float) -> float:
 	if fraction <= 0.0 or rng == null:
