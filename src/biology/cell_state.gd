@@ -41,15 +41,20 @@ func transport_requests(dt: float, world, config) -> Dictionary:
 	if not alive:
 		return {"glucose": 0.0, "oxygen": 0.0}
 
-	var local_glucose: float = world.sample("glucose", position)
-	var glucose_rate := config.glucose_transport_vmax * glucose_transport_scale * local_glucose / (config.glucose_transport_km + local_glucose)
-	var glucose_capacity := maxf(0.0, config.intracellular_pool_capacity_per_volume * volume - internal_glucose)
-	var requested_glucose := minf(glucose_rate * dt, glucose_capacity)
+	var local_glucose: float = float(world.sample("glucose", position))
+	var glucose_vmax: float = float(config.glucose_transport_vmax)
+	var glucose_km: float = float(config.glucose_transport_km)
+	var pool_capacity_per_volume: float = float(config.intracellular_pool_capacity_per_volume)
+	var glucose_rate: float = glucose_vmax * glucose_transport_scale * local_glucose / (glucose_km + local_glucose)
+	var glucose_capacity: float = maxf(0.0, pool_capacity_per_volume * volume - internal_glucose)
+	var requested_glucose: float = minf(glucose_rate * dt, glucose_capacity)
 
-	var local_oxygen: float = world.sample("oxygen", position)
-	var oxygen_rate := config.oxygen_transport_vmax * oxygen_transport_scale * local_oxygen / (config.oxygen_transport_km + local_oxygen)
-	var oxygen_capacity := maxf(0.0, config.intracellular_pool_capacity_per_volume * volume - internal_oxygen)
-	var requested_oxygen := minf(oxygen_rate * dt, oxygen_capacity)
+	var local_oxygen: float = float(world.sample("oxygen", position))
+	var oxygen_vmax: float = float(config.oxygen_transport_vmax)
+	var oxygen_km: float = float(config.oxygen_transport_km)
+	var oxygen_rate: float = oxygen_vmax * oxygen_transport_scale * local_oxygen / (oxygen_km + local_oxygen)
+	var oxygen_capacity: float = maxf(0.0, pool_capacity_per_volume * volume - internal_oxygen)
+	var requested_oxygen: float = minf(oxygen_rate * dt, oxygen_capacity)
 
 	return {"glucose": requested_glucose, "oxygen": requested_oxygen}
 
@@ -69,34 +74,37 @@ func step_intracellular(dt: float, config) -> void:
 	_assert_state()
 
 func _metabolize(dt: float, config) -> void:
-	var catalytic_limit := config.respiration_vmax * respiration_scale * volume * dt
-	var substrate_limit := minf(internal_glucose, internal_oxygen / config.oxygen_per_glucose)
-	var flux := minf(catalytic_limit, substrate_limit)
+	var catalytic_limit: float = float(config.respiration_vmax) * respiration_scale * volume * dt
+	var oxygen_per_glucose: float = float(config.oxygen_per_glucose)
+	var substrate_limit: float = minf(internal_glucose, internal_oxygen / oxygen_per_glucose)
+	var flux: float = minf(catalytic_limit, substrate_limit)
 	if flux <= 0.0:
 		return
 	internal_glucose -= flux
-	internal_oxygen -= flux * config.oxygen_per_glucose
-	atp += flux * config.atp_yield_per_glucose
-	precursor += flux * config.precursor_yield_per_glucose
-	ros += flux * config.ros_yield_per_glucose
+	internal_oxygen -= flux * oxygen_per_glucose
+	atp += flux * float(config.atp_yield_per_glucose)
+	precursor += flux * float(config.precursor_yield_per_glucose)
+	ros += flux * float(config.ros_yield_per_glucose)
 
 func _pay_maintenance(dt: float, config) -> void:
-	var required := config.maintenance_atp_rate_per_volume * volume * dt
-	var paid := minf(atp, required)
+	var required: float = float(config.maintenance_atp_rate_per_volume) * volume * dt
+	var paid: float = minf(atp, required)
 	atp -= paid
-	var unmet := required - paid
+	var unmet: float = required - paid
 	if unmet > 0.0:
 		energy_debt += unmet
 	else:
 		energy_debt = maxf(0.0, energy_debt - required * 0.25)
 
 func _update_damage_and_repair(dt: float, config) -> void:
-	ros = maxf(0.0, ros - config.basal_ros_decay_rate * ros * dt)
-	damage += config.ros_damage_rate * ros * dt
+	var ros_decay_rate: float = float(config.basal_ros_decay_rate)
+	var ros_damage_rate: float = float(config.ros_damage_rate)
+	ros = maxf(0.0, ros - ros_decay_rate * ros * dt)
+	damage += ros_damage_rate * ros * dt
 
-	var possible_repair := config.basal_repair_rate * repair_scale * dt
+	var possible_repair: float = float(config.basal_repair_rate) * repair_scale * dt
 	possible_repair = minf(possible_repair, damage)
-	var repair_cost := possible_repair * config.repair_atp_cost
+	var repair_cost: float = possible_repair * float(config.repair_atp_cost)
 	if repair_cost > atp and repair_cost > 0.0:
 		possible_repair *= atp / repair_cost
 		repair_cost = atp
@@ -104,37 +112,40 @@ func _update_damage_and_repair(dt: float, config) -> void:
 	damage = maxf(0.0, damage - possible_repair)
 
 func _grow(dt: float, config) -> void:
-	var kinetic_limit := config.growth_vmax * growth_scale * volume * dt
-	var energetic_limit := atp / config.growth_atp_per_precursor
-	var flux := minf(precursor, minf(kinetic_limit, energetic_limit))
+	var kinetic_limit: float = float(config.growth_vmax) * growth_scale * volume * dt
+	var growth_atp_per_precursor: float = float(config.growth_atp_per_precursor)
+	var energetic_limit: float = atp / growth_atp_per_precursor
+	var flux: float = minf(precursor, minf(kinetic_limit, energetic_limit))
 	if flux <= 0.0:
 		return
 	precursor -= flux
-	atp -= flux * config.growth_atp_per_precursor
-	volume += flux * config.volume_yield_per_precursor
+	atp -= flux * growth_atp_per_precursor
+	volume += flux * float(config.volume_yield_per_precursor)
 
 func _check_viability(config) -> void:
-	if damage >= config.lethal_damage:
+	if damage >= float(config.lethal_damage):
 		alive = false
 		death_reason = "damage"
-	elif energy_debt >= config.lethal_energy_debt:
+	elif energy_debt >= float(config.lethal_energy_debt):
 		alive = false
 		death_reason = "energy_failure"
 
 func ready_to_divide(config) -> bool:
-	return alive and volume >= config.division_volume and atp >= config.division_atp_cost
+	return alive and volume >= float(config.division_volume) and atp >= float(config.division_atp_cost)
 
 func create_daughters(first_id: int, second_id: int, tick: int, rng, world, config) -> Array:
 	assert(ready_to_divide(config))
-	atp -= config.division_atp_cost
-	var ratio := 0.5 + rng.randf_range(-config.partition_jitter, config.partition_jitter)
-	var first_offset := Vector2(rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0)).normalized() * config.daughter_offset_grid
+	atp -= float(config.division_atp_cost)
+	var partition_jitter: float = float(config.partition_jitter)
+	var ratio: float = 0.5 + float(rng.randf_range(-partition_jitter, partition_jitter))
+	var offset_scale: float = float(config.daughter_offset_grid)
+	var first_offset: Vector2 = Vector2(float(rng.randf_range(-1.0, 1.0)), float(rng.randf_range(-1.0, 1.0))).normalized() * offset_scale
 	if first_offset == Vector2.ZERO:
-		first_offset = Vector2(config.daughter_offset_grid, 0.0)
-	var second_offset := -first_offset
+		first_offset = Vector2(offset_scale, 0.0)
+	var second_offset: Vector2 = -first_offset
 
-	var first := CellState.new(first_id, id, generation + 1, tick, world.clamp_position(position + first_offset), volume * ratio)
-	var second := CellState.new(second_id, id, generation + 1, tick, world.clamp_position(position + second_offset), volume * (1.0 - ratio))
+	var first = CellState.new(first_id, id, generation + 1, tick, world.clamp_position(position + first_offset), volume * ratio)
+	var second = CellState.new(second_id, id, generation + 1, tick, world.clamp_position(position + second_offset), volume * (1.0 - ratio))
 	_copy_partitioned_state(first, ratio)
 	_copy_partitioned_state(second, 1.0 - ratio)
 	_copy_traits(first)
