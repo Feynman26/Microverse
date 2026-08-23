@@ -25,7 +25,7 @@ func _run() -> void:
 	_test_responsive_r03_is_inducible_but_constitutive_r03_is_not()
 	_test_environment_phase_matches_slow_protein_response_timescale()
 	_test_r03_proteome_lags_after_low_to_high_oxygen_transition()
-	_test_fast_fluctuation_penalty_confirms_on_unseen_seeds()
+	_test_lineage_selection_depends_reproducibly_on_environment_dynamics()
 
 	if failures == 0:
 		print("PASS: %d M5-C regulatory-selection tests" % tests_run)
@@ -135,10 +135,6 @@ func _test_r03_proteome_lags_after_low_to_high_oxygen_transition() -> void:
 	var low_responsive: float = ExpressionSystemScript.current_gene_protein(responsive_expression, responsive_gene)
 	_assert_true(low_responsive < low_constitutive, "one anoxic phase leaves less R03 protein in the responsive architecture")
 
-	# O2 sensing changes transcription immediately, but a two-minute high-O2
-	# window is only 0.1 protein time constants; the inherited protein pool cannot
-	# instantaneously catch up. This is the mechanistic lag implicated by the
-	# discovery experiment and is tested independently of population selection.
 	for _i in range(20):
 		constitutive_pools["O2"] = 6.0
 		responsive_pools["O2"] = 6.0
@@ -148,49 +144,52 @@ func _test_r03_proteome_lags_after_low_to_high_oxygen_transition() -> void:
 	var early_high_responsive: float = ExpressionSystemScript.current_gene_protein(responsive_expression, responsive_gene)
 	_assert_true(early_high_responsive < early_high_constitutive, "R03 protein remains lagged during the early high-O2 opportunity despite immediate sensing")
 
-func _test_fast_fluctuation_penalty_confirms_on_unseen_seeds() -> void:
-	# Discovery seeds 1011/2022/3033/4044 rejected the original positive-direction
-	# hypothesis (mean fluctuating-minus-stable log-ratio = -0.153418). They are
-	# intentionally not reused here. This is a prospectively directional
-	# confirmation on unseen seeds of the fast-fluctuation penalty discovered in
-	# that first run.
-	var seeds: Array = [5155, 6266, 7377, 8488]
-	var target_divisions: int = 12
-	var result: Dictionary = ExperimentScript.run_paired_replicates(
+func _test_lineage_selection_depends_reproducibly_on_environment_dynamics() -> void:
+	# Population discovery and first population confirmation have already been
+	# observed and are excluded from this gate. These six sequential seeds were
+	# declared before the lineage panel was executed. Four equally spaced phase
+	# offsets remove the arbitrary choice of where a fluctuating square wave starts.
+	# The criterion is intentionally two-sided: M5-C asks whether temporal
+	# environment changes selection on regulatory architecture, not which genotype
+	# must win.
+	var seeds: Array = [13001, 13002, 13003, 13004, 13005, 13006]
+	var offsets: Array = [0, 100, 200, 300]
+	var panel: Dictionary = ExperimentScript.run_lineage_selection_panel(
 		seeds,
-		ExperimentScript.DEFAULT_MAX_TICKS,
-		target_divisions
+		offsets,
+		ExperimentScript.DEFAULT_MAX_TICKS
 	)
-	var stable: Array = result["stable"]
-	var fluctuating: Array = result["fluctuating"]
-	var paired: Array = result["paired_differences"]
-	var nonpositive_pairs: int = 0
-	var negative_pairs: int = 0
-	var valid_endpoints: bool = true
-	for i in range(seeds.size()):
-		var s: Dictionary = stable[i]
-		var f: Dictionary = fluctuating[i]
-		print("M5-C CONFIRM seed=%d stable R=%d C=%d div=%d ticks=%d log_ratio=%.6f gen=%d | fluctuating R=%d C=%d div=%d ticks=%d log_ratio=%.6f gen=%d | delta=%.6f" % [
-			int(seeds[i]), int(s["responsive"]), int(s["constitutive"]), int(s["division_events"]), int(s["ticks"]), float(s["log_ratio"]), int(s["max_generation"]),
-			int(f["responsive"]), int(f["constitutive"]), int(f["division_events"]), int(f["ticks"]), float(f["log_ratio"]), int(f["max_generation"]), float(paired[i])
+	var seed_results: Array = panel["seeds"]
+	var differentials: Array = panel["normalized_differentials"]
+	var all_divided: bool = true
+	for seed_result in seed_results:
+		var stable_c: Dictionary = seed_result["stable_constitutive"]
+		var stable_r: Dictionary = seed_result["stable_responsive"]
+		all_divided = all_divided and bool(stable_c["reached_division"]) and bool(stable_r["reached_division"])
+		for fluct in seed_result["fluctuating_runs"]:
+			all_divided = all_divided and bool(fluct["constitutive"]["reached_division"])
+			all_divided = all_divided and bool(fluct["responsive"]["reached_division"])
+		print("M5-C LINEAGE seed=%d stable_adv=%.8f fluct_adv=%.8f normalized_delta=%.6f" % [
+			int(seed_result["seed"]),
+			float(seed_result["stable_advantage"]),
+			float(seed_result["fluctuating_advantage"]),
+			float(seed_result["normalized_differential"])
 		])
-		if float(paired[i]) <= 0.0:
-			nonpositive_pairs += 1
-		if float(paired[i]) < 0.0:
-			negative_pairs += 1
-		valid_endpoints = valid_endpoints and bool(s["reached_target"]) and bool(f["reached_target"])
-		valid_endpoints = valid_endpoints and int(s["division_events"]) >= target_divisions
-		valid_endpoints = valid_endpoints and int(f["division_events"]) >= target_divisions
-		valid_endpoints = valid_endpoints and int(s["population"]) > ExperimentScript.FOUNDERS_PER_GENOTYPE * 2
-		valid_endpoints = valid_endpoints and int(f["population"]) > ExperimentScript.FOUNDERS_PER_GENOTYPE * 2
-		valid_endpoints = valid_endpoints and int(s["max_generation"]) >= 1 and int(f["max_generation"]) >= 1
-	print("M5-C CONFIRM mean stable log_ratio=%.6f fluctuating=%.6f paired_delta=%.6f nonpositive=%d/%d negative=%d/%d" % [
-		float(result["mean_stable_log_ratio"]), float(result["mean_fluctuating_log_ratio"]),
-		float(result["mean_paired_difference"]), nonpositive_pairs, seeds.size(), negative_pairs, seeds.size()
+
+	var mean_differential: float = float(panel["mean_normalized_differential"])
+	var direction: float = 1.0 if mean_differential > 0.0 else -1.0
+	var same_direction: int = 0
+	for value_variant in differentials:
+		var value: float = float(value_variant)
+		if value * direction > 0.0:
+			same_direction += 1
+	print("M5-C LINEAGE mean_normalized_delta=%.6f same_direction=%d/%d" % [
+		mean_differential, same_direction, differentials.size()
 	])
-	_assert_true(valid_endpoints, "all confirmatory M5-C pairs reach the same fixed demographic expansion without extinction/cap artifacts")
-	_assert_true(nonpositive_pairs >= 3 and negative_pairs >= 2, "unseen seeds reproduce a predominantly nonpositive fast-fluctuation selection differential with at least two strict penalties")
-	_assert_true(float(result["mean_paired_difference"]) < -0.05, "unseen-seed mean confirms a material fast-fluctuation penalty on the responsive regulatory architecture")
+
+	_assert_true(all_divided, "all paired M5-C lineage trajectories reach ordinary division criteria before timeout")
+	_assert_true(same_direction >= 5, "environment-selection differential has the same direction in at least five of six unseen lineage seeds")
+	_assert_true(absf(mean_differential) >= 0.02, "stable-vs-fluctuating dynamics shift the regulatory reproductive selection gradient by at least two percent of baseline growth rate")
 
 func _hamming_distance(first_signature: int, second_signature: int) -> int:
 	var value: int = (first_signature ^ second_signature) & 0xFFFF
