@@ -4,6 +4,7 @@ const SimConfigScript = preload("res://src/core/sim_config.gd")
 const MetaboliteCatalogScript = preload("res://src/chemistry/metabolite_catalog.gd")
 const MetabolicSolverScript = preload("res://src/chemistry/metabolic_solver.gd")
 const ExpressionSystemScript = preload("res://src/expression/expression_system.gd")
+const DNAReplicationScript = preload("res://src/genetics/dna_replication.gd")
 const SimulationEngineScript = preload("res://src/simulation/simulation_engine.gd")
 
 var failures: int = 0
@@ -103,16 +104,18 @@ func _test_lysis_conserves_modeled_structural_material() -> void:
 
 	var chemical_before: Dictionary = MetabolicSolverScript.structural_totals(cell.metabolites)
 	var expression_before: Dictionary = ExpressionSystemScript.structural_storage_totals(cell.expression_state, config)
+	var dna_nuc: float = DNAReplicationScript.total_cell_dna_nuc_material(cell, config)
+	var nuc_units: Dictionary = MetaboliteCatalogScript.structural_units("NUC")
 	var expected: Dictionary = {
-		"C": float(chemical_before["C"]) + float(expression_before["C"]),
-		"N": float(chemical_before["N"]) + float(expression_before["N"]),
-		"P": float(chemical_before["P"]) + float(expression_before["P"])
+		"C": float(chemical_before["C"]) + float(expression_before["C"]) + dna_nuc * float(nuc_units["C"]),
+		"N": float(chemical_before["N"]) + float(expression_before["N"]) + dna_nuc * float(nuc_units["N"]),
+		"P": float(chemical_before["P"]) + float(expression_before["P"]) + dna_nuc * float(nuc_units["P"])
 	}
 	var release: Dictionary = cell.releasable_pools(config)
 	var observed: Dictionary = _structural_totals_from_release(release)
-	_assert_close(float(observed["C"]), float(expected["C"]), 1e-9, "lysis conserves modeled structural carbon including BIO and protein/RNA material")
-	_assert_close(float(observed["N"]), float(expected["N"]), 1e-9, "lysis conserves modeled structural nitrogen including BIO and protein/RNA material")
-	_assert_close(float(observed["P"]), float(expected["P"]), 1e-9, "lysis conserves modeled structural phosphorus including BIO and RNA material")
+	_assert_close(float(observed["C"]), float(expected["C"]), 1e-9, "lysis conserves modeled structural carbon including BIO, protein/RNA and DNA material")
+	_assert_close(float(observed["N"]), float(expected["N"]), 1e-9, "lysis conserves modeled structural nitrogen including BIO, protein/RNA and DNA material")
+	_assert_close(float(observed["P"]), float(expected["P"]), 1e-9, "lysis conserves modeled structural phosphorus including BIO, RNA and DNA material")
 
 	var bio: float = cell.pool("BIO")
 	var aa_field: String = MetaboliteCatalogScript.extracellular_field("AA")
@@ -120,7 +123,7 @@ func _test_lysis_conserves_modeled_structural_material() -> void:
 	var nuc_field: String = MetaboliteCatalogScript.extracellular_field("NUC")
 	_assert_true(float(release[aa_field]) >= cell.pool("AA") + 2.0 * bio, "lysis hydrolyzes BIO into reusable amino-acid precursor")
 	_assert_close(float(release[lip_field]), cell.pool("LIP") + bio, 1e-12, "lysis hydrolyzes BIO into exact lipid precursor stoichiometry")
-	_assert_true(float(release[nuc_field]) >= cell.pool("NUC") + 2.0 * bio, "lysis hydrolyzes BIO and RNA into reusable nucleotide precursor")
+	_assert_true(float(release[nuc_field]) >= cell.pool("NUC") + 2.0 * bio + dna_nuc, "lysis returns BIO, RNA and genomic DNA as reusable nucleotide precursor")
 
 func _structural_totals_from_release(release: Dictionary) -> Dictionary:
 	var result: Dictionary = {"C": 0.0, "N": 0.0, "P": 0.0}
