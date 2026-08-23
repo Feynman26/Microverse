@@ -43,12 +43,7 @@ func seed_ancestor(position: Vector2 = Vector2(-1.0, -1.0)):
 	cell.genome = GenomeScript.create_ancestor()
 	cell.initialize_metabolism(config)
 	cells.append(cell)
-	_record_event("birth", {
-		"cell_id": cell.id,
-		"parent_id": -1,
-		"generation": 0,
-		"genotype_fingerprint": cell.genome.fingerprint()
-	})
+	_record_event("birth", {"cell_id": cell.id, "parent_id": -1, "generation": 0, "genotype_fingerprint": cell.genome.fingerprint()})
 	return cell
 
 func step(tick_count: int = 1) -> void:
@@ -60,26 +55,20 @@ func _step_once() -> void:
 	var dt: float = float(config.tick_dt_min)
 	world.diffuse(dt)
 	_allocate_membrane_transport(dt)
-
 	for cell in cells:
 		if cell.alive:
-			cell.step_intracellular(dt, config, reactions)
-
+			cell.step_intracellular(dt, config, reactions, rng)
 	_process_deaths()
 	_process_divisions()
 	world.assert_nonnegative()
 	tick_index += 1
 	simulation_time_min += dt
 
-# All transported resources use the same request -> site-scale -> application
-# protocol. Availability is sampled once after diffusion; no cell receives a
-# priority merely because it is earlier in the array.
 func _allocate_membrane_transport(dt: float) -> void:
 	var records: Array = []
 	var totals: Dictionary = {}
 	for resource in TRANSPORTED_RESOURCES:
 		totals[resource] = {}
-
 	for cell in cells:
 		if not cell.alive:
 			continue
@@ -90,7 +79,6 @@ func _allocate_membrane_transport(dt: float) -> void:
 			var resource_totals: Dictionary = totals[resource]
 			resource_totals[key] = float(resource_totals.get(key, 0.0)) + float(request.get(resource, 0.0))
 			totals[resource] = resource_totals
-
 	var scales: Dictionary = {}
 	for resource in TRANSPORTED_RESOURCES:
 		var resource_scales: Dictionary = {}
@@ -101,7 +89,6 @@ func _allocate_membrane_transport(dt: float) -> void:
 			var total_request: float = float(resource_totals[key])
 			resource_scales[key] = 1.0 if total_request <= available or total_request <= 0.0 else available / total_request
 		scales[resource] = resource_scales
-
 	for record in records:
 		var cell = record["cell"]
 		var key: Vector2i = record["key"]
@@ -122,42 +109,25 @@ func _process_deaths() -> void:
 		var pools: Dictionary = cell.releasable_pools()
 		for resource in TRANSPORTED_RESOURCES:
 			world.release(resource, cell.position, float(pools.get(resource, 0.0)))
-		_record_event("death", {
-			"cell_id": cell.id,
-			"generation": cell.generation,
-			"reason": cell.death_reason,
-			"genotype_fingerprint": cell.genome.fingerprint() if cell.genome != null else -1
-		})
+		_record_event("death", {"cell_id": cell.id, "generation": cell.generation, "reason": cell.death_reason, "genotype_fingerprint": cell.genome.fingerprint() if cell.genome != null else -1})
 	cells = survivors
 
 func _process_divisions() -> void:
 	var next_population: Array = []
 	var projected_population: int = cells.size()
-
 	for cell in cells:
 		if not cell.alive:
 			continue
 		if cell.ready_to_divide(config) and projected_population < int(config.max_cells):
 			var daughters: Array = cell.create_daughters(_allocate_cell_id(), _allocate_cell_id(), tick_index, rng, world, config)
 			projected_population += 1
-			_record_event("division", {
-				"parent_id": cell.id,
-				"parent_genotype_fingerprint": cell.genome.fingerprint() if cell.genome != null else -1,
-				"daughter_ids": [daughters[0].id, daughters[1].id],
-				"generation": cell.generation + 1
-			})
-
+			_record_event("division", {"parent_id": cell.id, "parent_genotype_fingerprint": cell.genome.fingerprint() if cell.genome != null else -1, "daughter_ids": [daughters[0].id, daughters[1].id], "generation": cell.generation + 1})
 			for daughter in daughters:
 				var parent_fingerprint: int = int(cell.genome.fingerprint())
 				var mutation_result: Dictionary = mutation_engine.mutate_copy(daughter.genome, rng, config)
 				daughter.genome = mutation_result["genome"]
 				var daughter_fingerprint: int = int(daughter.genome.fingerprint())
-				_record_event("birth", {
-					"cell_id": daughter.id,
-					"parent_id": cell.id,
-					"generation": daughter.generation,
-					"genotype_fingerprint": daughter_fingerprint
-				})
+				_record_event("birth", {"cell_id": daughter.id, "parent_id": cell.id, "generation": daughter.generation, "genotype_fingerprint": daughter_fingerprint})
 				for raw_event in mutation_result["events"]:
 					var mutation_payload: Dictionary = raw_event.duplicate(true)
 					mutation_payload["mutation_id"] = _allocate_mutation_id()
@@ -170,14 +140,10 @@ func _process_divisions() -> void:
 			next_population.append_array(daughters)
 		else:
 			next_population.append(cell)
-
 	cells = next_population
 
 func _grid_key(position: Vector2) -> Vector2i:
-	return Vector2i(
-		clampi(roundi(position.x), 0, int(config.world_width) - 1),
-		clampi(roundi(position.y), 0, int(config.world_height) - 1)
-	)
+	return Vector2i(clampi(roundi(position.x), 0, int(config.world_width) - 1), clampi(roundi(position.y), 0, int(config.world_height) - 1))
 
 func _allocate_cell_id() -> int:
 	var result: int = next_cell_id
@@ -214,15 +180,13 @@ func total_cell_volume() -> float:
 func mutation_event_count() -> int:
 	var result: int = 0
 	for event in event_log:
-		if event["kind"] == "mutation":
-			result += 1
+		if event["kind"] == "mutation": result += 1
 	return result
 
 func genotype_count() -> int:
 	var genotypes: Dictionary = {}
 	for cell in cells:
-		if cell.genome != null:
-			genotypes[cell.genome.canonical_key()] = true
+		if cell.genome != null: genotypes[cell.genome.canonical_key()] = true
 	return genotypes.size()
 
 func checksum() -> float:
