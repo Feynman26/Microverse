@@ -142,7 +142,8 @@ func _update_status() -> void:
 		+ "Mutation events: %d\n" % simulation.mutation_event_count()
 		+ "Total BIO-volume: %.3f\n" % simulation.total_cell_volume()
 		+ "Division ready: %d\n" % int(division["ready"])
-		+ "  size-ready / ATP-blocked: %d / %d\n\n" % [int(division["volume_ready"]), int(division["volume_ready_atp_blocked"])]
+		+ "  size-ready / ATP-blocked: %d / %d\n" % [int(division["volume_ready"]), int(division["volume_ready_atp_blocked"])]
+		+ "  size+ATP / DNA-blocked: %d / %d\n\n" % [int(division["volume_atp_ready"]), int(division["volume_atp_ready_replication_blocked"])]
 		+ "Environment\n"
 		+ "  G: %.2f  O2: %.2f\n" % [glucose_total, oxygen_total]
 		+ "  N: %.2f  P: %.2f\n\n" % [nitrogen_total, phosphorus_total]
@@ -155,22 +156,31 @@ func _update_status() -> void:
 func _division_status() -> Dictionary:
 	var ready: int = 0
 	var volume_ready: int = 0
+	var volume_atp_ready: int = 0
 	var volume_ready_atp_blocked: int = 0
+	var volume_atp_ready_replication_blocked: int = 0
 	for cell in simulation.cells:
 		if not cell.alive:
 			continue
 		var has_volume: bool = float(cell.volume) >= float(simulation.config.division_volume)
 		var has_atp: bool = float(cell.pool("ATP")) >= float(simulation.config.division_atp_cost)
+		var is_ready: bool = cell.ready_to_divide(simulation.config)
 		if has_volume:
 			volume_ready += 1
-			if has_atp:
-				ready += 1
-			else:
+			if not has_atp:
 				volume_ready_atp_blocked += 1
+			else:
+				volume_atp_ready += 1
+				if not is_ready:
+					volume_atp_ready_replication_blocked += 1
+		if is_ready:
+			ready += 1
 	return {
 		"ready": ready,
 		"volume_ready": volume_ready,
-		"volume_ready_atp_blocked": volume_ready_atp_blocked
+		"volume_atp_ready": volume_atp_ready,
+		"volume_ready_atp_blocked": volume_ready_atp_blocked,
+		"volume_atp_ready_replication_blocked": volume_atp_ready_replication_blocked
 	}
 
 func _focal_cell_status() -> String:
@@ -187,7 +197,9 @@ func _focal_cell_status() -> String:
 		"Focal cell #%d  gen %d\n" % [cell.id, cell.generation]
 		+ "  genotype: %d\n" % cell.genome.fingerprint()
 		+ "  volume/BIO: %.3f / %.3f\n" % [cell.volume, cell.pool("BIO")]
-		+ "  ATP/ADP: %.3f / %.3f\n" % [cell.pool("ATP"), cell.pool("ADP")]
+		+ "  ATP/ADP: %.3f / %.3f  total %.3f\n" % [cell.pool("ATP"), cell.pool("ADP"), cell.total_adenylate()]
+		+ "  NAD/NADH total: %.3f\n" % cell.total_redox_currency()
+		+ "  DNA copy progress: %.3f\n" % cell.replication_progress
 		+ "  G/C3/C2: %.3f / %.3f / %.3f\n" % [cell.pool("G"), cell.pool("C3"), cell.pool("C2")]
 		+ "  W1/W2: %.3f / %.3f\n" % [cell.pool("W1"), cell.pool("W2")]
 		+ "  ROS/damage: %.3f / %.3f\n" % [cell.pool("ROS"), cell.damage]
