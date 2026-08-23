@@ -56,7 +56,7 @@ func _pools() -> Dictionary:
 func _test_translation_is_capped_by_shared_ribosome_budget() -> void:
 	var config = _config()
 	var genome = _genome()
-	var state: Dictionary = _state(genome, 1000.0, 1000.0)
+	var state: Dictionary = _state(genome, 400.0, 400.0)
 	var pools: Dictionary = _pools()
 	var summary: Dictionary = ExpressionSystemScript.step(state, genome, pools, config.tick_dt_min, DeterministicRngScript.new(7001), config)
 	var expected_capacity: float = (
@@ -72,7 +72,7 @@ func _test_translation_is_capped_by_shared_ribosome_budget() -> void:
 func _test_rejected_translation_spends_no_atp_or_amino_acid() -> void:
 	var config = _config()
 	var genome = _genome()
-	var state: Dictionary = _state(genome, 1000.0, 1000.0)
+	var state: Dictionary = _state(genome, 400.0, 400.0)
 	var pools: Dictionary = _pools()
 	var atp_before: float = float(pools["ATP"])
 	var aa_before: float = float(pools["AA"])
