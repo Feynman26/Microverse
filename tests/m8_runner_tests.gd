@@ -87,7 +87,8 @@ func _test_constant_abundant_environment_can_exceed_sixteen_cells() -> void:
 	# population below 16 despite large remaining nutrient inventories. M5-C had
 	# already defined O2=0.5 as the stable oxygen condition, so this assay reuses
 	# that independently motivated regime instead of tuning physiology or lowering
-	# the >16 acceptance criterion.
+	# the >16 acceptance criterion. The runner stops immediately after reaching 17
+	# cells so this scientific gate does not pay for unnecessary later mechanics.
 	var spec: Dictionary = ExperimentRunnerScript.create_spec(
 		77304,
 		8000,
@@ -103,13 +104,15 @@ func _test_constant_abundant_environment_can_exceed_sixteen_cells() -> void:
 	spec["world_height"] = 12
 	spec["max_cells"] = 24
 	spec["mutation_enabled"] = false
+	spec["stop_population_at_least"] = 17
 	var result: Dictionary = ExperimentRunnerScript.run(spec)
-	print("M8 stable-reservoir diagnostic: max_population=%d final_population=%d generation=%d divisions=%d deaths=%s final_resources=%s" % [
+	print("M8 stable-reservoir diagnostic: max_population=%d final_population=%d generation=%d divisions=%d deaths=%s ticks=%d final_resources=%s" % [
 		int(result["max_population"]),
 		int(result["final_population"]),
 		int(result["final_generation"]),
 		int(result["division_events"]),
 		str(result["death_causes"]),
+		int(result["realized_ticks"]),
 		str(result["final_resources"])
 	])
 	_assert_true(
@@ -118,8 +121,9 @@ func _test_constant_abundant_environment_can_exceed_sixteen_cells() -> void:
 			int(result["max_population"]), int(result["final_generation"]), int(result["division_events"]), str(result["death_causes"])
 		]
 	)
-	_assert_true(int(result["final_population"]) > 0, "stable abundant scheduled environment supports a living population through the assay horizon")
-	_assert_true(String(result["termination_reason"]) == "horizon", "stable sustained-resource run reaches planned horizon instead of forced extinction")
+	_assert_true(int(result["final_population"]) >= 17, "population threshold stops only after a living population crosses sixteen cells")
+	_assert_true(String(result["termination_reason"]) == "population_threshold", "runner records the population-threshold stop reason explicitly")
+	_assert_true(int(result["realized_ticks"]) < int(result["horizon_ticks"]), "population threshold avoids unnecessary post-gate simulation ticks")
 
 func _test_batch_order_does_not_change_individual_runs() -> void:
 	var spec: Dictionary = _short_constant_spec(1, 400, 40)
