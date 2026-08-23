@@ -113,9 +113,16 @@ static func capture_genome(genome) -> Dictionary:
 			"promoter_code": int(gene.promoter_code),
 			"protein_signature": int(gene.protein_signature),
 			"neutral_marker": int(gene.neutral_marker),
-			"regulatory_signature": int(gene.regulatory_signature)
+			"regulatory_signature": int(gene.regulatory_signature),
+			"promoter_copy_number": int(gene.promoter_copy_number),
+			"regulatory_copy_number": int(gene.regulatory_copy_number)
 		})
-	return {"genes": genes, "canonical_key": genome.canonical_key(), "fingerprint": int(genome.fingerprint())}
+	return {
+		"genes": genes,
+		"canonical_key": genome.canonical_key(),
+		"fingerprint": int(genome.fingerprint()),
+		"replication_units": float(genome.replication_unit_count())
+	}
 
 static func restore(snapshot: Dictionary):
 	_validate_snapshot(snapshot)
@@ -174,10 +181,13 @@ static func restore_genome(data: Dictionary):
 		var gene_data: Dictionary = gene_data_variant
 		genes.append(GeneScript.new(
 			int(gene_data["locus_id"]), int(gene_data["promoter_code"]), int(gene_data["protein_signature"]),
-			int(gene_data["neutral_marker"]), int(gene_data["regulatory_signature"])
+			int(gene_data["neutral_marker"]), int(gene_data["regulatory_signature"]),
+			int(gene_data.get("promoter_copy_number", 1)), int(gene_data.get("regulatory_copy_number", 1))
 		))
 	var genome = GenomeScript.new(genes)
 	assert(genome.canonical_key() == String(data["canonical_key"]))
+	if data.has("replication_units"):
+		assert(absf(genome.replication_unit_count() - float(data["replication_units"])) <= 1e-12)
 	return genome
 
 static func fork(sim, experiment_context: Dictionary = {}) -> Array:
