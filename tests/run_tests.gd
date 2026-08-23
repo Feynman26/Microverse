@@ -1,7 +1,10 @@
 extends SceneTree
 
 const SimConfigScript = preload("res://src/core/sim_config.gd")
+const DeterministicRngScript = preload("res://src/core/deterministic_rng.gd")
 const ChemicalFieldScript = preload("res://src/world/chemical_field.gd")
+const WorldStateScript = preload("res://src/world/world_state.gd")
+const CellStateScript = preload("res://src/biology/cell_state.gd")
 const SimulationEngineScript = preload("res://src/simulation/simulation_engine.gd")
 
 var failures: int = 0
@@ -13,6 +16,7 @@ func _init() -> void:
 func _run() -> void:
 	_test_diffusion_conserves_mass_and_nonnegativity()
 	_test_competing_identical_cells_are_order_fair()
+	_test_division_conserves_partitioned_pools()
 	_test_cell_grows_and_divides_with_resources()
 	_test_cell_dies_without_energy_source()
 	_test_same_seed_reproduces_same_history()
@@ -41,8 +45,6 @@ func _test_competing_identical_cells_are_order_fair() -> void:
 	config.initial_oxygen = 5.0
 	config.glucose_diffusion = 0.0
 	config.oxygen_diffusion = 0.0
-	# Deliberately make demand exceed the finite local glucose pool so this test
-	# exercises proportional allocation rather than merely equal requests.
 	config.glucose_transport_vmax = 10.0
 	var sim = SimulationEngineScript.new(config)
 	var position := Vector2(4.0, 4.0)
@@ -51,6 +53,31 @@ func _test_competing_identical_cells_are_order_fair() -> void:
 	sim.step(1)
 	_assert_close(first.internal_glucose, second.internal_glucose, 1e-12, "identical competitors receive equal scarce resource")
 	_assert_true(sim.world.get_field("glucose").get_value(4, 4) <= 1e-12, "scarce local glucose is exhausted by proportional allocation")
+
+func _test_division_conserves_partitioned_pools() -> void:
+	var config = SimConfigScript.new()
+	var rng = DeterministicRngScript.new(12345)
+	var world = WorldStateScript.new(8, 8, 1.0)
+	var parent = CellStateScript.new(1, -1, 0, 0, Vector2(4.0, 4.0), config.division_volume)
+	parent.internal_glucose = 1.2
+	parent.internal_oxygen = 2.4
+	parent.atp = 5.0
+	parent.precursor = 0.8
+	parent.ros = 0.3
+	parent.damage = 0.2
+	parent.energy_debt = 0.1
+
+	var expected_atp := parent.atp - config.division_atp_cost
+	var daughters: Array = parent.create_daughters(2, 3, 7, rng, world, config)
+	var a = daughters[0]
+	var b = daughters[1]
+	_assert_close(a.volume + b.volume, config.division_volume, 1e-12, "division conserves cell volume")
+	_assert_close(a.internal_glucose + b.internal_glucose, 1.2, 1e-12, "division conserves intracellular glucose")
+	_assert_close(a.internal_oxygen + b.internal_oxygen, 2.4, 1e-12, "division conserves intracellular oxygen")
+	_assert_close(a.atp + b.atp, expected_atp, 1e-12, "division conserves ATP after explicit division cost")
+	_assert_close(a.precursor + b.precursor, 0.8, 1e-12, "division conserves precursor")
+	_assert_true(a.parent_id == 1 and b.parent_id == 1, "both daughters retain immutable parent identity")
+	_assert_true(a.generation == 1 and b.generation == 1, "both daughters advance generation")
 
 func _test_cell_grows_and_divides_with_resources() -> void:
 	var config = SimConfigScript.new()
@@ -62,12 +89,15 @@ func _test_cell_grows_and_divides_with_resources() -> void:
 	sim.step(300)
 	_assert_true(sim.population_size() > 1, "resource-fed ancestor produces descendants")
 	_assert_true(sim.maximum_generation() >= 1, "division advances generation")
-	var saw_division := false
+	var division_events := 0
+	var birth_events := 0
 	for event in sim.event_log:
 		if event["kind"] == "division":
-			saw_division = true
-			break
-	_assert_true(saw_division, "division event is recorded")
+			division_events += 1
+		elif event["kind"] == "birth":
+			birth_events += 1
+	_assert_true(division_events > 0, "division event is recorded")
+	_assert_true(birth_events >= 3, "daughter births are recorded explicitly")
 
 func _test_cell_dies_without_energy_source() -> void:
 	var config = SimConfigScript.new()
