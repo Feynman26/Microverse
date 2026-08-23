@@ -2,9 +2,9 @@ extends SceneTree
 
 const SpikeScript = preload("res://src/experiments/m5c_timescale_spike.gd")
 
-# Prospectively frozen before any output from seeds 17001-17048. The finite
-# proteome mechanism is new production biology, so all seeds used by earlier
-# no-budget experiments are excluded from final inference.
+# Prospectively frozen after the RNG-locality correction and before any output
+# from seeds 18001-18048. Earlier panels used the variable-draw Poisson sampler
+# and therefore cannot serve as inference for the corrected stochastic model.
 const CONFIRM_PHASE_TICKS: int = 200
 const CONFIRM_PHASE_MIN: float = 20.0
 const MATERIAL_EFFECT: float = 0.02
@@ -19,7 +19,7 @@ func _init() -> void:
 
 func _run() -> void:
 	var seeds: Array = []
-	for seed in range(17001, 17049):
+	for seed in range(18001, 18049):
 		seeds.append(seed)
 
 	var result: Dictionary = SpikeScript.run_sweep(seeds, [CONFIRM_PHASE_TICKS])
@@ -45,7 +45,7 @@ func _run() -> void:
 			positive_count += 1
 		elif value < 0.0:
 			negative_count += 1
-		print("M5-C PROTEOME seed=%d stable_adv=%.8f fluct_adv=%.8f normalized_delta=%.6f" % [
+		print("M5-C STREAM-STABLE seed=%d stable_adv=%.8f fluct_adv=%.8f normalized_delta=%.6f" % [
 			int(seed_result["seed"]),
 			float(seed_result["stable_advantage"]),
 			float(seed_result["fluctuating_advantage"]),
@@ -56,7 +56,7 @@ func _run() -> void:
 	if mean_value == 0.0:
 		same_sign_count = 0
 
-	print("M5-C PROTEOME phase_min=%.1f mean=%.6f sd=%.6f se=%.6f signed_t=%.6f positive=%d negative=%d same_sign=%d/%d" % [
+	print("M5-C STREAM-STABLE phase_min=%.1f mean=%.6f sd=%.6f se=%.6f signed_t=%.6f positive=%d negative=%d same_sign=%d/%d" % [
 		CONFIRM_PHASE_MIN,
 		mean_value,
 		sample_sd,
@@ -68,16 +68,16 @@ func _run() -> void:
 		values.size()
 	])
 
-	_assert_true(bool(result["all_divided"]), "all independent finite-proteome M5-C lineages reach ordinary division criteria before timeout")
-	_assert_true(absf(mean_value) >= MATERIAL_EFFECT, "finite proteome makes stable-vs-fluctuating regulatory selection differ by at least two percent of baseline growth rate")
-	_assert_true(absf(signed_t) >= TWO_SIDED_T_CRITICAL_DF47, "independent 48-seed finite-proteome differential clears the predeclared two-sided t threshold")
-	_assert_true(same_sign_count >= REQUIRED_SAME_SIGN_SEEDS, "at least 31 of 48 independent seeds share the observed mean selection direction")
+	_assert_true(bool(result["all_divided"]), "all stream-stable finite-proteome M5-C lineages reach ordinary division criteria before timeout")
+	_assert_true(absf(mean_value) >= MATERIAL_EFFECT, "stream-stable finite proteome makes stable-vs-fluctuating regulatory selection differ by at least two percent of baseline growth rate")
+	_assert_true(absf(signed_t) >= TWO_SIDED_T_CRITICAL_DF47, "independent 48-seed stream-stable differential clears the predeclared two-sided t threshold")
+	_assert_true(same_sign_count >= REQUIRED_SAME_SIGN_SEEDS, "at least 31 of 48 independent stream-stable seeds share the observed mean selection direction")
 
 	if failures == 0:
-		print("PASS: %d M5-C finite-proteome confirmation tests" % tests_run)
+		print("PASS: %d M5-C stream-stable confirmation tests" % tests_run)
 		quit(0)
 	else:
-		push_error("FAIL: %d of %d M5-C finite-proteome confirmation tests failed" % [failures, tests_run])
+		push_error("FAIL: %d of %d M5-C stream-stable confirmation tests failed" % [failures, tests_run])
 		quit(1)
 
 func _assert_true(condition: bool, message: String) -> void:
