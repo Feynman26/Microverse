@@ -66,6 +66,7 @@ jobs:
       - name: Validate M5-C expression-burden mechanics
         run: godot --headless --path . --script tests/m5c_burden_mechanics_tests.gd
 
-      # Reproductive confirmation panels are intentionally not CI gates. Their
-      # frozen independent confirmations falsified the proposed M5-C effect and
-      # are retained as research evidence under docs/tests, not rewritten to pass.
+      - name: Validate M6 physical-cell mechanics
+        run: godot --headless --path . --script tests/m6_mechanics_tests.gd
+
+      # Frozen M5-C reproductive panels remain research evidence, not CI gates.

@@ -8,6 +8,7 @@ const CellStateScript = preload("res://src/biology/cell_state.gd")
 const GenomeScript = preload("res://src/genetics/genome.gd")
 const MutationEngineScript = preload("res://src/genetics/mutation_engine.gd")
 const ReactionCatalogScript = preload("res://src/chemistry/reaction_catalog.gd")
+const CellMechanicsScript = preload("res://src/physics/cell_mechanics.gd")
 
 const TRANSPORTED_RESOURCES: Array[String] = ["glucose", "oxygen", "nitrogen", "phosphorus"]
 
@@ -22,6 +23,7 @@ var simulation_time_min: float = 0.0
 var next_cell_id: int = 1
 var next_mutation_id: int = 1
 var event_log: Array = []
+var last_mechanics_summary: Dictionary = {}
 
 func _init(p_config = null) -> void:
 	config = p_config if p_config != null else SimConfigScript.new()
@@ -42,6 +44,7 @@ func seed_ancestor(position: Vector2 = Vector2(-1.0, -1.0)):
 	var cell = CellStateScript.new(_allocate_cell_id(), -1, 0, tick_index, world.clamp_position(position), config.ancestor_volume)
 	cell.genome = GenomeScript.create_ancestor()
 	cell.initialize_molecular_state(config)
+	cell.position = CellMechanicsScript.clamp_position(cell.position, CellMechanicsScript.radius_for_cell(cell, config), world)
 	cells.append(cell)
 	_record_event("birth", {
 		"cell_id": cell.id,
@@ -61,15 +64,13 @@ func _step_once() -> void:
 	world.diffuse(dt)
 	_allocate_membrane_transport(dt)
 
-	# All stochastic expression, molecular partition and mutation draws share the
-	# universe RNG. Replaying the same seed/state therefore reproduces phenotype
-	# noise as well as genetic history.
 	for cell in cells:
 		if cell.alive:
 			cell.step_intracellular(dt, config, reactions, rng)
 
 	_process_deaths()
 	_process_divisions()
+	last_mechanics_summary = CellMechanicsScript.relax(cells, world, config)
 	world.assert_nonnegative()
 	tick_index += 1
 	simulation_time_min += dt
@@ -172,6 +173,13 @@ func _process_divisions() -> void:
 			next_population.append(cell)
 
 	cells = next_population
+
+func relax_mechanics() -> Dictionary:
+	last_mechanics_summary = CellMechanicsScript.relax(cells, world, config)
+	return last_mechanics_summary
+
+func maximum_overlap() -> float:
+	return CellMechanicsScript.max_overlap(cells, config)
 
 func _grid_key(position: Vector2) -> Vector2i:
 	return Vector2i(
