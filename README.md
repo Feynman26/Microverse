@@ -2,68 +2,77 @@
 
 Microverse is a small, reproducible artificial-life laboratory focused on autonomous evolution in a spatially explicit digital microbial world.
 
-The project deliberately separates **digital physics/chemistry** from **evolvable biology**. The engine defines space, diffusion, conservation rules, possible molecular interactions, energetic costs, heredity and mutation mechanisms. It does **not** encode goals such as fitness, cooperation, competition, dormancy, predation or specialization. Those are phenomena to detect after they emerge from cell physiology, inheritance, ecology and stochasticity.
+The engine defines **physical and chemical possibility**; it does not assign fitness, cooperation, competition, dormancy, predation, signalling or specialization. Those labels belong to later analysis of outcomes, not to cell-state flags.
 
 ## Design principles
 
 1. **No explicit fitness score.** Reproductive success is the evolutionary consequence.
-2. **Deterministic stochasticity.** A world seed plus the same initial state and interventions must reproduce the same history.
-3. **Simulation/render separation.** The simulation advances in ticks independently of the UI so it can run headless and much faster than real time.
-4. **Conservation first.** Chemistry and transport must not create negative concentrations or accidental mass/energy.
-5. **Mechanisms, not behaviours.** Genes, proteins, reactions, membrane transport, damage, repair and division are modelled; named strategies are not hard-coded.
-6. **Observability.** Important births, deaths, mutations, lineage changes and interventions must be reconstructable.
-7. **Small world, deep biology.** Initial scope is a microchamber with tens of cells and a deliberately compressed biochemical model.
+2. **Deterministic stochasticity.** Same complete state + RNG state + interventions reproduces the same trajectory.
+3. **Simulation/render separation.** Biology advances independently of UI frame rate.
+4. **Conservation first.** Numerical or material inconsistencies fail loudly.
+5. **Mechanisms, not behaviours.** Molecular rules exist; named strategies do not.
+6. **Observability.** Births, deaths, mutations, lineages and molecular transitions must be reconstructable.
+7. **Small world, deep biology.** Scope is deliberately narrow enough to inspect causality.
 
-## Current vertical slice: M0-M4
+## Current development vertical slice: M0-M5
 
-The implemented causal chain is now:
+The branch under validation implements:
 
-`environment -> uptake -> genome -> catalytic affinity -> reaction flux -> metabolite pools -> ATP/precursors/BIO -> division -> inheritance -> mutation`
+`environment -> uptake -> intracellular ligand state -> regulation -> mRNA -> protein cohorts -> catalytic affinity -> reaction flux -> ATP/precursors/BIO -> division -> inheritance -> mutation -> delayed phenotype replacement`
 
-Current components include:
+Core capabilities now include:
 
-- closed 2D microchamber;
-- diffusing carbon, oxygen, nitrogen and phosphorus resources;
-- explicit numerical-stability validation;
-- simultaneous/fair local resource allocation among competing cells;
-- explicit 12-locus heritable genome with stable locus IDs;
-- promoter-code, 16-bit protein-signature and neutral-marker mutation;
-- deterministic mutation genealogy and genotype fingerprints;
-- 19 intracellular digital metabolites;
-- 12 structurally balanced catalytic reactions;
-- Hamming-distance protein/reaction affinity landscape;
-- catalytic promiscuity and side activity;
-- order-independent simultaneous metabolic solver;
-- explicit ATP/ADP and NAD/NADH currency pools;
-- C/N/P-conserving biomass precursor synthesis;
-- catalytic structural biomass (`BIO`) assembly;
-- physical cell volume derived from `BIO` rather than a direct growth scalar;
-- oxidative and oxygen-independent metabolic routes;
-- explicit ROS production, detoxification and downstream damage;
-- proteome-abundance opportunity cost;
-- dormant waste-recovery reactions that can become active through ordinary coding mutation;
-- division into two new daughter identities with stochastic molecular partitioning;
-- deterministic seeded RNG and whole-state checksum;
-- observer UI with population/genetics/resource and focal-cell chemistry/flux state;
-- headless invariant, landscape and metabolic-integration suites.
+- closed 2D microchamber and diffusing C/O/N/P resources;
+- numerically stable conservative diffusion;
+- simultaneous fair allocation of scarce local resources;
+- 12-locus heritable genome with stable locus IDs;
+- mutable promoter strength, protein signature, regulatory motif and neutral marker;
+- deterministic genotype fingerprints and mutation genealogy;
+- 19 intracellular digital metabolites and 12 balanced reactions;
+- Hamming-distance catalytic promiscuity;
+- simultaneous order-independent metabolic flux allocation;
+- explicit ATP/ADP and NAD/NADH currencies;
+- C/N/P-conserving precursor and BIO assembly;
+- cell volume derived from structural BIO;
+- aerobic, oxygen-independent and dormant waste-recovery metabolic possibilities;
+- explicit ROS production/detoxification and damage;
+- **mRNA abundance per locus**;
+- **persistent protein cohorts identified by the signature present when they were translated**;
+- transcription, translation and first-order molecular turnover;
+- ATP, AA and NUC opportunity cost of expression;
+- material recycling on macromolecular turnover;
+- C/N/P accounting extended across free metabolites + mRNA/protein material;
+- generic protein-to-promoter activation/repression by signature affinity;
+- generic intracellular ligand allostery with no named sensor classes;
+- ligand signatures deliberately outside the ancestral allosteric radius;
+- seeded expression noise and stochastic but conservative molecular partition at division;
+- genotype-to-phenotype lag after coding mutation because inherited old protein cohorts persist until turnover;
+- observer UI exposing genotype, metabolite pools, expression burden, protein-cohort count and dominant flux;
+- Godot 4.7.2 headless CI gates.
 
-### Why M4 matters
+### Why protein cohorts matter
 
-The genome is no longer merely inherited information. Protein-signature mutations can change catalytic affinity and therefore reaction flux.
+A DNA mutation must not retroactively mutate proteins that already exist.
 
-For example, ancestral W1 recovery is completely inactive across the ancestral proteome. A single appropriate bit mutation in one protein signature moves its reaction distance from 5 to 4, producing measurable W1-recovery flux and downstream C2. The engine does not label that mutation beneficial; its evolutionary consequence depends on resource availability, competing pathways, expression cost and descendants.
+M5 therefore tracks protein abundance by both locus and molecular signature. If a daughter inherits protein encoded by signature `A` and its DNA mutates to signature `B`, its immediate state is:
 
-This is the first complete Microverse path from molecular mutation to potentially selectable physiology without a fitness function.
+`DNA = B`
 
-### Current abstraction boundary before M5
+`proteome = inherited A + newly translated B`
 
-M4 still uses promoter code as a constitutive abundance proxy. M5 replaces that bridge with explicit mRNA/protein abundance, transcription, translation, degradation, regulation and seeded expression noise. Basal membrane transport and repair are also still transitional mechanisms rather than fully genome-derived systems.
+Over time, A decays and B accumulates. Consequently mutations can have delayed, buffered or transient effects without a dedicated phenotype-delay rule.
+
+### Why chemical sensing is not a behaviour API
+
+Each digital metabolite has a 16-bit ligand signature. A protein can become allosterically sensitive to a molecule only when mutation brings its protein signature into the configured binding neighborhood. The engine does not know that glucose is food, ROS is stress, or `X` is a signal.
+
+A molecule becomes **information** only when evolved binding and regulatory wiring make its concentration predictive/useful downstream.
+
+Controlled M5 assays include a semantically neutral `X` compound that changes biomass-reaction flux only after a constructed molecular circuit makes X-compatible protein binding regulate the relevant enzyme. This validates possibility without hard-coding the ecological interpretation.
 
 ## Requirements
 
-- Godot 4.7.2 (standard build; no .NET required)
-
-CI installs the same stable engine version.
+- Godot 4.7.2, standard build; no .NET required.
 
 ## Run
 
@@ -78,8 +87,6 @@ Controls:
 - `4`: 1000x;
 - `5`: 5000x.
 
-The renderer shows the extracellular glucose field, cells, virtual time, population, generation, genotype count, mutation count, environmental resources and a focal cell's BIO, ATP/ADP, central carbon pools, waste pools, ROS/damage and dominant reaction flux.
-
 ## Headless validation
 
 ```bash
@@ -87,15 +94,18 @@ godot --headless --editor --path . --quit
 godot --headless --path . --script tests/run_tests.gd
 godot --headless --path . --script tests/m4_landscape_tests.gd
 godot --headless --path . --script tests/m4_metabolism_tests.gd
+godot --headless --path . --script tests/m5_expression_tests.gd
+godot --headless --path . --script tests/m5_sensing_tests.gd
 ```
 
-The M4 gates include reaction-order independence; nonnegative chemistry; digital C/N/P conservation; ATP+ADP and NAD+NADH conservation; sparse-but-connected catalytic-landscape statistics; zero-expression/zero-flux controls; aerobic versus hypoxic pathway behavior; one-mutation activation of a dormant metabolic route; catalytic BIO assembly; explicit expression-energy cost; resource-supported division; starvation extinction; and exact same-seed history/checksum reproducibility.
+M5 is not considered complete merely because these new suites pass. All earlier M0-M4 gates must remain green as continuity constraints.
 
 ## Documentation
 
-- `docs/ARCHITECTURE.md` — system boundaries, tick semantics, target genome/protein/chemistry architecture, persistence, analytics and performance rules.
-- `docs/SCIENTIFIC_MODEL.md` — biological abstractions, equations, assumptions, limitations and validation hierarchy.
-- `docs/M3_GENETICS.md` — gene/genome representation, inheritance and mutation semantics.
-- `docs/M4_CATALYTIC_LANDSCAPE.md` — catalytic-affinity landscape design and statistical gate.
-- `docs/M4_METABOLIC_INTEGRATION.md` — intracellular pools, flux solver, conservation semantics, BIO growth and current M4/M5 boundary.
-- `docs/ROADMAP.md` — gate-driven implementation through regulation, spatial ecology, open evolution, laboratory tooling, evolved mutation rate, sensing/motility and horizontal transfer.
+- `docs/ARCHITECTURE.md` — system boundaries and simulation semantics.
+- `docs/SCIENTIFIC_MODEL.md` — abstractions, equations, assumptions and validation hierarchy.
+- `docs/M3_GENETICS.md` — gene/genome representation and mutation semantics.
+- `docs/M4_CATALYTIC_LANDSCAPE.md` — catalytic landscape design/statistical gate.
+- `docs/M4_METABOLIC_INTEGRATION.md` — explicit chemistry, flux and BIO growth.
+- `docs/M5_EXPRESSION_REGULATION.md` — expression, protein cohorts, regulation, allostery, sensing and phenotype lag.
+- `docs/ROADMAP.md` — gate-driven path through spatial ecology, open evolution, experimental tooling, evolved heredity, motility and horizontal transfer.
