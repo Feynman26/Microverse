@@ -40,6 +40,11 @@ func _config():
 	config.world_height = 12
 	config.max_cells = 8
 	config.mutation_enabled = false
+	# M7's closure fixture predates the M10 DNA-copy gate and asks whether
+	# chemistry/transport can restore the ordinary size+ATP division condition.
+	# Keep this historical capability assay scoped to M7; M10 separately proves
+	# that production cells must also finish physical genome replication.
+	config.evolvable_replication_enabled = false
 	config.initial_glucose = 0.0
 	config.initial_oxygen = 0.0
 	config.initial_nitrogen = 0.0
