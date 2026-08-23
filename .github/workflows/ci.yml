@@ -54,8 +54,10 @@ jobs:
       - name: Validate M10 repair-cost necessity control
         run: godot --headless --path . --script tests/m10_repair_cost_control.gd
 
-      - name: Profile default visual-run longitudinal dynamics
-        run: godot --headless --path . --script tests/m10_baseline_trace.gd
+      # One-off closure characterization. Remove from routine CI after its
+      # longitudinal evidence is captured; keep the script reproducible.
+      - name: Characterize default run through sixteen-cell episode
+        run: godot --headless --path . --script tests/m10_plateau_trace.gd
 
       - name: Run invariant suite
         run: godot --headless --path . --script tests/run_tests.gd
