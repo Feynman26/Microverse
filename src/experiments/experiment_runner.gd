@@ -23,6 +23,7 @@ static func create_spec(
 		"sample_every_ticks": sample_every_ticks,
 		"environment": environment.duplicate(true),
 		"stop_on_extinction": true,
+		"stop_population_at_least": 0,
 		"world_width": 64,
 		"world_height": 64,
 		"max_cells": 64,
@@ -39,6 +40,7 @@ static func run(spec: Dictionary) -> Dictionary:
 	var horizon_ticks: int = int(spec["horizon_ticks"])
 	var sample_every: int = int(spec["sample_every_ticks"])
 	var stop_on_extinction: bool = bool(spec.get("stop_on_extinction", true))
+	var stop_population_at_least: int = int(spec.get("stop_population_at_least", 0))
 	var environment: Dictionary = spec.get("environment", EnvironmentScheduleScript.closed())
 	var trajectory: Array = []
 	var max_population: int = sim.population_size()
@@ -52,15 +54,23 @@ static func run(spec: Dictionary) -> Dictionary:
 		realized_ticks += 1
 		max_population = maxi(max_population, sim.population_size())
 		var extinct: bool = sim.population_size() == 0
+		var population_threshold_reached: bool = (
+			stop_population_at_least > 0
+			and sim.population_size() >= stop_population_at_least
+		)
 		var should_sample: bool = (
 			realized_ticks % sample_every == 0
 			or realized_ticks == horizon_ticks
 			or extinct
+			or population_threshold_reached
 		)
 		if should_sample:
 			trajectory.append(_sample(sim))
 		if extinct and stop_on_extinction:
 			termination_reason = "extinction"
+			break
+		if population_threshold_reached:
+			termination_reason = "population_threshold"
 			break
 
 	return {
@@ -107,9 +117,12 @@ static func _validate_spec(spec: Dictionary) -> void:
 	assert(spec.has("seed"))
 	assert(int(spec.get("horizon_ticks", 0)) > 0)
 	assert(int(spec.get("sample_every_ticks", 0)) > 0)
+	assert(int(spec.get("stop_population_at_least", 0)) >= 0)
 	assert(int(spec.get("world_width", 64)) > 2)
 	assert(int(spec.get("world_height", 64)) > 2)
 	assert(int(spec.get("max_cells", 64)) >= 1)
+	if int(spec.get("stop_population_at_least", 0)) > 0:
+		assert(int(spec.get("stop_population_at_least", 0)) <= int(spec.get("max_cells", 64)))
 
 static func _create_config(spec: Dictionary):
 	var config = SimConfigScript.new()
