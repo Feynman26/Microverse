@@ -1,6 +1,5 @@
 extends SceneTree
 
-const DeterministicRngScript = preload("res://src/core/deterministic_rng.gd")
 const ReactionCatalogScript = preload("res://src/chemistry/reaction_catalog.gd")
 const CatalyticLandscapeScript = preload("res://src/chemistry/catalytic_landscape.gd")
 const MetabolicSolverScript = preload("res://src/chemistry/metabolic_solver.gd")
@@ -87,29 +86,36 @@ func _test_responsive_r03_is_inducible_but_constitutive_r03_is_not() -> void:
 
 func _test_fluctuating_environment_selects_regulatory_architecture_differently() -> void:
 	var seeds: Array = [1011, 2022, 3033, 4044]
-	var result: Dictionary = ExperimentScript.run_paired_replicates(seeds, 3600)
+	var result: Dictionary = ExperimentScript.run_paired_replicates(
+		seeds,
+		ExperimentScript.DEFAULT_MAX_TICKS,
+		ExperimentScript.DEFAULT_TARGET_DIVISIONS
+	)
 	var stable: Array = result["stable"]
 	var fluctuating: Array = result["fluctuating"]
 	var paired: Array = result["paired_differences"]
 	var positive_pairs: int = 0
-	var viable: bool = true
+	var valid_endpoints: bool = true
 	for i in range(seeds.size()):
 		var s: Dictionary = stable[i]
 		var f: Dictionary = fluctuating[i]
-		print("M5-C seed=%d stable R=%d C=%d log_ratio=%.6f gen=%d | fluctuating R=%d C=%d log_ratio=%.6f gen=%d | delta=%.6f" % [
-			int(seeds[i]), int(s["responsive"]), int(s["constitutive"]), float(s["log_ratio"]), int(s["max_generation"]),
-			int(f["responsive"]), int(f["constitutive"]), float(f["log_ratio"]), int(f["max_generation"]), float(paired[i])
+		print("M5-C seed=%d stable R=%d C=%d div=%d ticks=%d log_ratio=%.6f gen=%d | fluctuating R=%d C=%d div=%d ticks=%d log_ratio=%.6f gen=%d | delta=%.6f" % [
+			int(seeds[i]), int(s["responsive"]), int(s["constitutive"]), int(s["division_events"]), int(s["ticks"]), float(s["log_ratio"]), int(s["max_generation"]),
+			int(f["responsive"]), int(f["constitutive"]), int(f["division_events"]), int(f["ticks"]), float(f["log_ratio"]), int(f["max_generation"]), float(paired[i])
 		])
 		if float(paired[i]) > 0.0:
 			positive_pairs += 1
-		viable = viable and int(s["population"]) > ExperimentScript.FOUNDERS_PER_GENOTYPE * 2
-		viable = viable and int(f["population"]) > ExperimentScript.FOUNDERS_PER_GENOTYPE * 2
-		viable = viable and int(s["max_generation"]) >= 1 and int(f["max_generation"]) >= 1
+		valid_endpoints = valid_endpoints and bool(s["reached_target"]) and bool(f["reached_target"])
+		valid_endpoints = valid_endpoints and int(s["division_events"]) >= ExperimentScript.DEFAULT_TARGET_DIVISIONS
+		valid_endpoints = valid_endpoints and int(f["division_events"]) >= ExperimentScript.DEFAULT_TARGET_DIVISIONS
+		valid_endpoints = valid_endpoints and int(s["population"]) > ExperimentScript.FOUNDERS_PER_GENOTYPE * 2
+		valid_endpoints = valid_endpoints and int(f["population"]) > ExperimentScript.FOUNDERS_PER_GENOTYPE * 2
+		valid_endpoints = valid_endpoints and int(s["max_generation"]) >= 1 and int(f["max_generation"]) >= 1
 	print("M5-C mean stable log_ratio=%.6f fluctuating=%.6f paired_delta=%.6f positive_pairs=%d/%d" % [
 		float(result["mean_stable_log_ratio"]), float(result["mean_fluctuating_log_ratio"]),
 		float(result["mean_paired_difference"]), positive_pairs, seeds.size()
 	])
-	_assert_true(viable, "both M5-C treatments support reproduction rather than comparing extinction artifacts")
+	_assert_true(valid_endpoints, "all M5-C pairs reach the same fixed demographic expansion without extinction/cap artifacts")
 	_assert_true(positive_pairs >= 3, "fluctuation increases responsive-vs-constitutive selection in at least three of four paired seeds")
 	_assert_true(float(result["mean_paired_difference"]) > 0.05, "mean responsive selection is materially stronger under fluctuating than transport-matched stable O2")
 
