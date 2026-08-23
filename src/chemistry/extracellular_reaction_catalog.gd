@@ -5,19 +5,18 @@ const ExtracellularReactionDefinitionScript = preload("res://src/chemistry/extra
 
 # M7 extracellular reactions remain ordinary chemistry. E01 hydrolyzes one C4
 # lipid precursor into two C2 units. E02 converts tracked extracellular oxidant
-# into the otherwise semantically neutral X species. Neither reaction contains
-# producer, beneficiary, cooperation, cheating, detoxification-role, or
-# ownership state; those interpretations are measured only by counterfactuals.
+# into the otherwise semantically neutral X species. E03 performs the reverse
+# tracked conversion, allowing damaging extracellular chemistry to arise from a
+# secreted catalyst without adding any toxin/combat behavior state.
 #
-# E01 is distance 4 from the one-bit-accessible secreted D136 protein used in
-# M7-E while remaining outside the ancestral catalytic radius.
-# E02 is distance 4 from DACE. DACE itself is one ordinary coding-bit mutation
-# from ancestral locus 5 (5ACE -> DACE), carries the same generic Dxxx secretion
-# motif, and E02 remains distance >= 5 from every ancestral protein. D136 is
-# distance 6 from E02, preventing the M7-E public-resource enzyme from receiving
-# this detox activity for free.
+# Each capability is sequence-separated: D136 -> E01, DACE -> E02, DE03 -> E03
+# are distance 4 pairs, while the matching secreted proteins are outside the
+# active radius of the other two extracellular reactions. Each secreted protein
+# is itself one ordinary coding-bit mutation from an ancestral locus, and every
+# reaction remains outside the catalytic radius of the unmodified ancestor.
 const E01_SIGNATURE: int = 0xD0F2
 const E02_SIGNATURE: int = 0xC0DE
+const E03_SIGNATURE: int = 0xC202
 
 static func create_m7_candidate() -> Array:
 	return [
@@ -35,6 +34,14 @@ static func create_m7_candidate() -> Array:
 			E02_SIGNATURE,
 			{"oxidant": 1.0},
 			{"neutral_x": 1.0},
+			1.0
+		),
+		ExtracellularReactionDefinitionScript.new(
+			"E03",
+			"extracellular_oxidant_generation",
+			E03_SIGNATURE,
+			{"neutral_x": 1.0},
+			{"oxidant": 1.0},
 			1.0
 		)
 	]
