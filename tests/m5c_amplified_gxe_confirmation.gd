@@ -36,6 +36,12 @@ func _run() -> void:
 		print("M5-C AMP-GXE seed=%d stable_adv=%.8f high_anoxic_adv=%.8f normalized_delta=%.6f" % [
 			int(record["seed"]), float(record["stable_advantage"]), float(record["fluctuating_advantage"]), value
 		])
+		_report_if_censored(record["stable_constitutive"])
+		_report_if_censored(record["stable_responsive"])
+		for run_variant in record["runs"]:
+			var run: Dictionary = run_variant
+			_report_if_censored(run["constitutive"])
+			_report_if_censored(run["responsive"])
 	print("M5-C AMP-GXE mean=%.6f sd=%.6f se=%.6f signed_t=%.6f positive=%d/%d" % [mean_value, sd, se, signed_t, positive, values.size()])
 
 	_assert_true(bool(result["all_divided"]), "all amplified GxE lineages reach ordinary division criteria before timeout")
@@ -49,6 +55,23 @@ func _run() -> void:
 	else:
 		push_error("FAIL: %d of %d amplified GxE M5-C confirmation tests failed" % [failures, tests_run])
 		quit(1)
+
+func _report_if_censored(lineage: Dictionary) -> void:
+	if bool(lineage["reached_division"]):
+		return
+	print("M5-C CENSORED seed=%d genotype=%s condition=%s offset=%d ticks=%d alive=%s death=%s volume=%.6f ATP=%.6f damage=%.6f debt=%.6f" % [
+		int(lineage["seed"]),
+		String(lineage["genotype"]),
+		String(lineage["condition"]),
+		int(lineage["phase_offset_ticks"]),
+		int(lineage["ticks"]),
+		str(bool(lineage["alive"])),
+		String(lineage["death_reason"]),
+		float(lineage["volume"]),
+		float(lineage["atp"]),
+		float(lineage["damage"]),
+		float(lineage["energy_debt"])
+	])
 
 func _assert_true(condition: bool, message: String) -> void:
 	tests_run += 1
