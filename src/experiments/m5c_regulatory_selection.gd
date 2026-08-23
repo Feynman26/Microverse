@@ -10,8 +10,8 @@ const ExpressionSystemScript = preload("res://src/expression/expression_system.g
 
 # M5-C is a deliberately narrow evolutionary-selection assay. It does not add
 # an environment scheduler to production biology and does not assign fitness.
-# Cells divide or die through ordinary Microverse physiology; this harness only
-# imposes controlled extracellular resource concentrations and counts descendants.
+# Cells grow/divide/die through ordinary Microverse physiology; the harness only
+# imposes controlled extracellular resource concentrations and measures outcomes.
 
 const CONDITION_STABLE: String = "stable"
 const CONDITION_FLUCTUATING: String = "fluctuating"
@@ -23,9 +23,6 @@ const OXPHOS_PROTEIN_SIGNATURE: int = 0x369C
 # With oxygen Km = 0.60, these values match the time-average empty-cell oxygen
 # transport propensity exactly for a 50/50 square wave:
 #   0.5/(0.6+0.5) = 0.5 * 6/(0.6+6) = 0.454545...
-# This does not force equal realized uptake after physiology diverges; it removes
-# the trivial explanation that the fluctuating treatment simply has a lower
-# mean membrane-transport opportunity by construction.
 const STABLE_OXYGEN: float = 0.5
 const FLUCTUATING_OXYGEN_HIGH: float = 6.0
 const FLUCTUATING_OXYGEN_LOW: float = 0.0
@@ -43,9 +40,6 @@ static func create_config(seed: int):
 	config.seed = seed
 	config.world_width = 4
 	config.world_height = 4
-	# The assay terminates after a fixed number of division events. This cap is
-	# deliberately far above any expected endpoint so SimulationEngine's
-	# sequential near-cap division handling cannot influence genotype frequency.
 	config.max_cells = 128
 	config.glucose_diffusion = 0.0
 	config.oxygen_diffusion = 0.0
@@ -69,19 +63,18 @@ static func create_competitor_genomes() -> Dictionary:
 	# The competitors are genetically identical except for locus 3's promoter
 	# motif: responsive binds the O2-compatible regulator; constitutive does not.
 	var common: Array = [
-		GeneScript.new(1, 6200, 0x1357, 101, DORMANT_MOTIF), # R01 carbon activation
-		GeneScript.new(2, 5400, 0x2468, 102, DORMANT_MOTIF), # R02 carbon processing
-		GeneScript.new(3, 7100, OXPHOS_PROTEIN_SIGNATURE, 103, DORMANT_MOTIF), # R03 target
-		GeneScript.new(4, 4800, 0x48AD, 104, DORMANT_MOTIF), # weak fermentation
-		GeneScript.new(5, 3900, 0x5ACE, 105, DORMANT_MOTIF), # AA precursor
-		GeneScript.new(6, 6600, 0x6BDF, 106, DORMANT_MOTIF), # lipid precursor
-		GeneScript.new(7, 5700, 0x7CE1, 107, DORMANT_MOTIF), # nucleotide precursor
-		GeneScript.new(8, 4500, 0x8DF2, 108, DORMANT_MOTIF), # ROS control
-		GeneScript.new(9, 6000, 0xAF14, 109, DORMANT_MOTIF), # BIO assembly
-		# 0xCCCC is exactly compatible with O2. High bit => repressor; bit 14 set
-		# => O2 binding inhibits that repression. The protein is outside all M4
-		# catalytic radii, so its modeled role here is regulatory rather than a
-		# hidden metabolic reaction.
+		GeneScript.new(1, 6200, 0x1357, 101, DORMANT_MOTIF),
+		GeneScript.new(2, 5400, 0x2468, 102, DORMANT_MOTIF),
+		GeneScript.new(3, 7100, OXPHOS_PROTEIN_SIGNATURE, 103, DORMANT_MOTIF),
+		GeneScript.new(4, 4800, 0x48AD, 104, DORMANT_MOTIF),
+		GeneScript.new(5, 3900, 0x5ACE, 105, DORMANT_MOTIF),
+		GeneScript.new(6, 6600, 0x6BDF, 106, DORMANT_MOTIF),
+		GeneScript.new(7, 5700, 0x7CE1, 107, DORMANT_MOTIF),
+		GeneScript.new(8, 4500, 0x8DF2, 108, DORMANT_MOTIF),
+		GeneScript.new(9, 6000, 0xAF14, 109, DORMANT_MOTIF),
+		# 0xCCCC exactly matches O2 ligand identity. Its sequence bits make it a
+		# ligand-inhibited repressor in the generic M5-B grammar and it is outside
+		# every M4 catalytic radius.
 		GeneScript.new(10, 5000, OXYGEN_LIGAND_SIGNATURE, 110, DORMANT_MOTIF)
 	]
 	var constitutive = GenomeScript.new(common)
@@ -110,6 +103,9 @@ static func oxygen_for_tick(condition: String, tick: int) -> float:
 	var phase: int = (tick / PHASE_TICKS) % 2
 	return FLUCTUATING_OXYGEN_HIGH if phase == 0 else FLUCTUATING_OXYGEN_LOW
 
+# Population assay retained as characterization of drift and frequency dynamics.
+# It is intentionally not the final M5-C causal gate: at very small N the
+# descendant-count signal can be dominated by stochastic lineage branching.
 static func run_replicate(
 	seed: int,
 	condition: String,
@@ -155,7 +151,6 @@ static func run_replicate(
 	assert(classified == sim.population_size(), "M5-C mutation-free competition produced an unexpected genotype")
 	assert(classified < int(config.max_cells), "M5-C endpoint touched population cap and is not a valid selection assay")
 	var responsive_fraction: float = 0.0 if classified == 0 else float(responsive_count) / float(classified)
-	# Pseudocount is an analysis guard for extinction, not a reproductive score.
 	var log_ratio: float = log((float(responsive_count) + 0.5) / (float(constitutive_count) + 0.5))
 	return {
 		"seed": seed,
@@ -198,13 +193,117 @@ static func run_paired_replicates(
 		"mean_paired_difference": _mean_values(paired_differences)
 	}
 
+# Causal M5-C gate: measure reproductive rate of one genotype at a time, using
+# the production SimulationEngine/CellState/ExpressionSystem/MetabolicSolver.
+# max_cells=1 prevents SimulationEngine from replacing the mature founder with
+# daughters; the harness can therefore observe the first instant at which normal
+# division criteria become satisfied without changing intracellular physics.
+static func run_lineage(
+	seed: int,
+	genotype_name: String,
+	condition: String,
+	phase_offset_ticks: int = 0,
+	max_ticks: int = DEFAULT_MAX_TICKS
+) -> Dictionary:
+	assert(genotype_name == "constitutive" or genotype_name == "responsive")
+	assert(condition == CONDITION_STABLE or condition == CONDITION_FLUCTUATING)
+	assert(phase_offset_ticks >= 0 and max_ticks > 0)
+	var config = create_config(seed)
+	config.max_cells = 1
+	var sim = SimulationEngineScript.new(config)
+	var genome = create_competitor_genomes()[genotype_name]
+	var cell = CellStateScript.new(1, -1, 0, 0, Vector2(1.5, 1.5), config.ancestor_volume)
+	cell.genome = genome.deep_copy()
+	cell.initialize_molecular_state(config)
+	sim.cells = [cell]
+	sim.next_cell_id = 2
+
+	var realized_ticks: int = 0
+	var reached_division: bool = false
+	for tick in range(max_ticks):
+		_maintain_environment(sim, oxygen_for_tick(condition, tick + phase_offset_ticks))
+		sim.step(1)
+		realized_ticks += 1
+		if sim.cells.is_empty():
+			break
+		cell = sim.cells[0]
+		if cell.ready_to_divide(config):
+			reached_division = true
+			break
+
+	var elapsed_min: float = float(realized_ticks) * float(config.tick_dt_min)
+	var growth_rate: float = 0.0
+	if reached_division and elapsed_min > 0.0:
+		growth_rate = log(2.0) / elapsed_min
+	return {
+		"seed": seed,
+		"genotype": genotype_name,
+		"condition": condition,
+		"phase_offset_ticks": phase_offset_ticks,
+		"ticks": realized_ticks,
+		"time_min": elapsed_min,
+		"reached_division": reached_division,
+		"alive": not sim.cells.is_empty() and sim.cells[0].alive,
+		"growth_rate": growth_rate,
+		"volume": 0.0 if sim.cells.is_empty() else float(sim.cells[0].volume),
+		"atp": 0.0 if sim.cells.is_empty() else float(sim.cells[0].pool("ATP"))
+	}
+
+# For each seed, stable growth advantage is measured once. Fluctuating growth
+# advantage is averaged across four equally spaced phase offsets so the result
+# cannot depend on always starting the founder at the same square-wave phase.
+# The output is a dimensionless environment-selection differential normalized by
+# the mean stable division rate for that seed.
+static func run_lineage_selection_panel(
+	seeds: Array,
+	phase_offsets: Array = [0, 100, 200, 300],
+	max_ticks: int = DEFAULT_MAX_TICKS
+) -> Dictionary:
+	assert(not seeds.is_empty() and not phase_offsets.is_empty())
+	var seed_results: Array = []
+	var normalized_differentials: Array = []
+	for seed_variant in seeds:
+		var seed: int = int(seed_variant)
+		var stable_c: Dictionary = run_lineage(seed, "constitutive", CONDITION_STABLE, 0, max_ticks)
+		var stable_r: Dictionary = run_lineage(seed, "responsive", CONDITION_STABLE, 0, max_ticks)
+		var stable_advantage: float = float(stable_r["growth_rate"]) - float(stable_c["growth_rate"])
+		var fluctuating_advantages: Array = []
+		var fluctuating_runs: Array = []
+		for offset_variant in phase_offsets:
+			var offset: int = int(offset_variant)
+			var fluct_c: Dictionary = run_lineage(seed, "constitutive", CONDITION_FLUCTUATING, offset, max_ticks)
+			var fluct_r: Dictionary = run_lineage(seed, "responsive", CONDITION_FLUCTUATING, offset, max_ticks)
+			fluctuating_runs.append({"offset": offset, "constitutive": fluct_c, "responsive": fluct_r})
+			fluctuating_advantages.append(float(fluct_r["growth_rate"]) - float(fluct_c["growth_rate"]))
+		var fluctuating_advantage: float = _mean_values(fluctuating_advantages)
+		var differential: float = fluctuating_advantage - stable_advantage
+		var reference_rate: float = maxf(
+			1e-12,
+			0.5 * (float(stable_r["growth_rate"]) + float(stable_c["growth_rate"]))
+		)
+		var normalized: float = differential / reference_rate
+		normalized_differentials.append(normalized)
+		seed_results.append({
+			"seed": seed,
+			"stable_constitutive": stable_c,
+			"stable_responsive": stable_r,
+			"stable_advantage": stable_advantage,
+			"fluctuating_runs": fluctuating_runs,
+			"fluctuating_advantage": fluctuating_advantage,
+			"differential": differential,
+			"normalized_differential": normalized
+		})
+	return {
+		"seeds": seed_results,
+		"normalized_differentials": normalized_differentials,
+		"mean_normalized_differential": _mean_values(normalized_differentials)
+	}
+
 static func _seed_founders(sim, responsive, constitutive, seed: int) -> void:
 	var order: Array = []
 	for _i in range(FOUNDERS_PER_GENOTYPE):
 		order.append(responsive)
 		order.append(constitutive)
-	# Reciprocal insertion ordering across replicate seeds prevents one genotype
-	# from always receiving earlier RNG draws in the cell traversal.
 	if seed % 2 != 0:
 		order.reverse()
 
