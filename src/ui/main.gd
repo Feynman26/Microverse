@@ -2,9 +2,9 @@ extends Node2D
 
 const SimulationEngineScript = preload("res://src/simulation/simulation_engine.gd")
 
-const TILE_PX := 8.0
-const WORLD_ORIGIN := Vector2(20.0, 70.0)
-const BASE_SIM_MIN_PER_REAL_SEC := 1.0
+const TILE_PX: float = 8.0
+const WORLD_ORIGIN: Vector2 = Vector2(20.0, 70.0)
+const BASE_SIM_MIN_PER_REAL_SEC: float = 1.0
 
 var simulation
 var paused: bool = false
@@ -22,8 +22,7 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if not paused:
 		_sim_minute_budget += delta * BASE_SIM_MIN_PER_REAL_SEC * time_multiplier
-		var ticks_to_run := int(floor(_sim_minute_budget / simulation.config.tick_dt_min))
-		# Prevent one slow frame from creating an unbounded catch-up spiral.
+		var ticks_to_run: int = int(floor(_sim_minute_budget / simulation.config.tick_dt_min))
 		ticks_to_run = mini(ticks_to_run, 5000)
 		if ticks_to_run > 0:
 			simulation.step(ticks_to_run)
@@ -54,18 +53,20 @@ func _draw() -> void:
 
 func _draw_glucose_field() -> void:
 	var field = simulation.world.get_field("glucose")
-	var reference := maxf(simulation.config.initial_glucose, 1e-9)
+	var reference: float = maxf(float(simulation.config.initial_glucose), 1e-9)
 	for y in range(field.height):
 		for x in range(field.width):
-			var normalized := clampf(field.get_value(x, y) / reference, 0.0, 1.0)
-			var intensity := 0.06 + 0.34 * normalized
-			var rect := Rect2(WORLD_ORIGIN + Vector2(float(x), float(y)) * TILE_PX, Vector2(TILE_PX, TILE_PX))
+			var normalized: float = clampf(float(field.get_value(x, y)) / reference, 0.0, 1.0)
+			var intensity: float = 0.06 + 0.34 * normalized
+			var rect: Rect2 = Rect2(WORLD_ORIGIN + Vector2(float(x), float(y)) * TILE_PX, Vector2(TILE_PX, TILE_PX))
 			draw_rect(rect, Color(0.04, intensity, 0.10 + 0.30 * normalized, 1.0), true)
 
 func _draw_cells() -> void:
 	for cell in simulation.cells:
-		var screen_position := WORLD_ORIGIN + cell.position * TILE_PX + Vector2(TILE_PX * 0.5, TILE_PX * 0.5)
-		var radius := maxf(2.5, sqrt(cell.volume) * 4.0)
+		var cell_position: Vector2 = cell.position
+		var cell_volume: float = float(cell.volume)
+		var screen_position: Vector2 = WORLD_ORIGIN + cell_position * TILE_PX + Vector2(TILE_PX * 0.5, TILE_PX * 0.5)
+		var radius: float = maxf(2.5, sqrt(cell_volume) * 4.0)
 		draw_circle(screen_position, radius, Color(0.88, 0.93, 0.96, 1.0))
 		draw_circle(screen_position, maxf(1.0, radius - 1.5), Color(0.16, 0.30, 0.34, 1.0))
 
@@ -83,7 +84,7 @@ func _create_labels() -> void:
 func _update_status() -> void:
 	var glucose_total: float = simulation.world.get_field("glucose").total_amount()
 	var oxygen_total: float = simulation.world.get_field("oxygen").total_amount()
-	var state := "PAUSED" if paused else "RUNNING"
+	var state: String = "PAUSED" if paused else "RUNNING"
 	_status_label.text = (
 		"STATE: %s\n\n" % state
 		+ "Experimental clock: %.0fx\n" % time_multiplier
