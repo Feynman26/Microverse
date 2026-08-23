@@ -41,12 +41,16 @@ func _test_competing_identical_cells_are_order_fair() -> void:
 	config.initial_oxygen = 5.0
 	config.glucose_diffusion = 0.0
 	config.oxygen_diffusion = 0.0
+	# Deliberately make demand exceed the finite local glucose pool so this test
+	# exercises proportional allocation rather than merely equal requests.
+	config.glucose_transport_vmax = 10.0
 	var sim = SimulationEngineScript.new(config)
 	var position := Vector2(4.0, 4.0)
 	var first = sim.seed_ancestor(position)
 	var second = sim.seed_ancestor(position)
 	sim.step(1)
 	_assert_close(first.internal_glucose, second.internal_glucose, 1e-12, "identical competitors receive equal scarce resource")
+	_assert_true(sim.world.get_field("glucose").get_value(4, 4) <= 1e-12, "scarce local glucose is exhausted by proportional allocation")
 
 func _test_cell_grows_and_divides_with_resources() -> void:
 	var config = SimConfigScript.new()
