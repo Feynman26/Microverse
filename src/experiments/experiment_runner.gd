@@ -73,6 +73,7 @@ static func run(spec: Dictionary) -> Dictionary:
 			termination_reason = "population_threshold"
 			break
 
+	var final_cell_diagnostics: Dictionary = _cell_diagnostics(sim)
 	return {
 		"schema_version": SCHEMA_VERSION,
 		"model_version": MODEL_VERSION,
@@ -90,6 +91,7 @@ static func run(spec: Dictionary) -> Dictionary:
 		"mutation_events": sim.mutation_event_count(),
 		"death_causes": _death_causes(sim),
 		"final_resources": _field_totals(sim),
+		"final_cell_diagnostics": final_cell_diagnostics,
 		"final_checksum": sim.checksum()
 	}
 
@@ -160,7 +162,37 @@ static func _sample(sim) -> Dictionary:
 		"division_events": _event_count(sim, "division"),
 		"death_causes": _death_causes(sim),
 		"resources": _field_totals(sim),
+		"cell_diagnostics": _cell_diagnostics(sim),
 		"checksum": sim.checksum()
+	}
+
+static func _cell_diagnostics(sim) -> Dictionary:
+	var population: int = sim.population_size()
+	if population == 0:
+		return {
+			"mean_damage": 0.0,
+			"max_damage": 0.0,
+			"mean_energy_debt": 0.0,
+			"max_energy_debt": 0.0,
+			"total_intracellular_ros": 0.0
+		}
+	var total_damage: float = 0.0
+	var max_damage: float = 0.0
+	var total_energy_debt: float = 0.0
+	var max_energy_debt: float = 0.0
+	var total_ros: float = 0.0
+	for cell in sim.cells:
+		total_damage += float(cell.damage)
+		max_damage = maxf(max_damage, float(cell.damage))
+		total_energy_debt += float(cell.energy_debt)
+		max_energy_debt = maxf(max_energy_debt, float(cell.energy_debt))
+		total_ros += float(cell.pool("ROS"))
+	return {
+		"mean_damage": total_damage / float(population),
+		"max_damage": max_damage,
+		"mean_energy_debt": total_energy_debt / float(population),
+		"max_energy_debt": max_energy_debt,
+		"total_intracellular_ros": total_ros
 	}
 
 static func _field_totals(sim) -> Dictionary:
