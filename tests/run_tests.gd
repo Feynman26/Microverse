@@ -5,6 +5,8 @@ const DeterministicRngScript = preload("res://src/core/deterministic_rng.gd")
 const ChemicalFieldScript = preload("res://src/world/chemical_field.gd")
 const WorldStateScript = preload("res://src/world/world_state.gd")
 const CellStateScript = preload("res://src/biology/cell_state.gd")
+const GenomeScript = preload("res://src/genetics/genome.gd")
+const MutationEngineScript = preload("res://src/genetics/mutation_engine.gd")
 const SimulationEngineScript = preload("res://src/simulation/simulation_engine.gd")
 const MainUiScript = preload("res://src/ui/main.gd")
 
@@ -15,11 +17,18 @@ func _init() -> void:
 	call_deferred("_run")
 
 func _run() -> void:
-	# Referencing the preloaded UI script makes parse failures part of this suite.
 	_assert_true(MainUiScript != null, "main UI script parses")
 	_test_diffusion_conserves_mass_and_nonnegativity()
 	_test_competing_identical_cells_are_order_fair()
 	_test_division_conserves_partitioned_pools()
+	_test_ancestor_genome_is_stable_and_copyable()
+	_test_mutation_disabled_inheritance_is_deep_copy()
+	_test_forced_mutations_change_only_child_genotype()
+	_test_same_seed_reproduces_exact_mutation_sequence()
+	_test_different_seed_changes_forced_mutation_history()
+	_test_neutral_marker_is_physically_neutral_in_m3()
+	_test_mutation_frequency_matches_configured_probability()
+	_test_simulation_records_mutation_ancestry()
 	_test_cell_grows_and_divides_with_resources()
 	_test_cell_dies_without_energy_source()
 	_test_same_seed_reproduces_same_history()
@@ -82,6 +91,129 @@ func _test_division_conserves_partitioned_pools() -> void:
 	_assert_true(a.parent_id == 1 and b.parent_id == 1, "both daughters retain immutable parent identity")
 	_assert_true(a.generation == 1 and b.generation == 1, "both daughters advance generation")
 
+func _test_ancestor_genome_is_stable_and_copyable() -> void:
+	var ancestor = GenomeScript.create_ancestor()
+	var copied = ancestor.deep_copy()
+	_assert_true(ancestor.gene_count() == 12, "M3 ancestor contains twelve discrete loci")
+	_assert_true(ancestor.exact_equals(copied), "deep-copied genome is exactly equal")
+	_assert_true(ancestor.fingerprint() == copied.fingerprint(), "equal genomes share deterministic fingerprint")
+	_assert_true(ancestor != copied and ancestor.genes[0] != copied.genes[0], "genome copy has no shared mutable gene objects")
+
+func _test_mutation_disabled_inheritance_is_deep_copy() -> void:
+	var config = SimConfigScript.new()
+	config.mutation_enabled = false
+	var rng = DeterministicRngScript.new(7721)
+	var world = WorldStateScript.new(8, 8, 1.0)
+	var parent = CellStateScript.new(10, -1, 0, 0, Vector2(4.0, 4.0), config.division_volume)
+	parent.atp = 5.0
+	parent.genome = GenomeScript.create_ancestor()
+	var parent_key: String = parent.genome.canonical_key()
+	var daughters: Array = parent.create_daughters(11, 12, 1, rng, world, config)
+	var a = daughters[0]
+	var b = daughters[1]
+	_assert_true(a.genome.canonical_key() == parent_key and b.genome.canonical_key() == parent_key, "mutation-free daughters inherit exact parental genotype")
+	_assert_true(a.genome != b.genome and a.genome.genes[0] != b.genome.genes[0], "sister genomes are independent mutable copies")
+
+func _forced_mutation_config():
+	var config = SimConfigScript.new()
+	config.promoter_mutation_rate_per_gene = 1.0
+	config.signature_mutation_rate_per_gene = 1.0
+	config.neutral_marker_mutation_rate_per_gene = 1.0
+	return config
+
+func _test_forced_mutations_change_only_child_genotype() -> void:
+	var config = _forced_mutation_config()
+	var rng = DeterministicRngScript.new(44321)
+	var mutator = MutationEngineScript.new()
+	var parent = GenomeScript.create_ancestor()
+	var parent_key_before: String = parent.canonical_key()
+	var result: Dictionary = mutator.mutate_copy(parent, rng, config)
+	var child = result["genome"]
+	var events: Array = result["events"]
+	_assert_true(parent.canonical_key() == parent_key_before, "mutation engine never mutates parental genome")
+	_assert_true(not parent.exact_equals(child), "forced molecular mutations alter child genotype")
+	_assert_true(events.size() == parent.gene_count() * 3, "forced M3 mutation emits promoter signature and neutral event per locus")
+	_assert_true(parent.gene_count() == child.gene_count(), "point-like M3 mutation preserves genome structure")
+
+func _test_same_seed_reproduces_exact_mutation_sequence() -> void:
+	var config = _forced_mutation_config()
+	var mutator = MutationEngineScript.new()
+	var first_rng = DeterministicRngScript.new(91731)
+	var second_rng = DeterministicRngScript.new(91731)
+	var first: Dictionary = mutator.mutate_copy(GenomeScript.create_ancestor(), first_rng, config)
+	var second: Dictionary = mutator.mutate_copy(GenomeScript.create_ancestor(), second_rng, config)
+	_assert_true(first["genome"].canonical_key() == second["genome"].canonical_key(), "same seed reproduces exact mutated genotype")
+	_assert_true(first["events"] == second["events"], "same seed reproduces exact mutation event sequence")
+
+func _test_different_seed_changes_forced_mutation_history() -> void:
+	var config = _forced_mutation_config()
+	var mutator = MutationEngineScript.new()
+	var first: Dictionary = mutator.mutate_copy(GenomeScript.create_ancestor(), DeterministicRngScript.new(1), config)
+	var second: Dictionary = mutator.mutate_copy(GenomeScript.create_ancestor(), DeterministicRngScript.new(2), config)
+	_assert_true(first["genome"].canonical_key() != second["genome"].canonical_key(), "different seeds can produce different mutation histories")
+
+func _test_neutral_marker_is_physically_neutral_in_m3() -> void:
+	var config = SimConfigScript.new()
+	var world = WorldStateScript.new(8, 8, 1.0)
+	world.register_field("glucose", 0.0, 2.0)
+	world.register_field("oxygen", 0.0, 2.0)
+	var base_genome = GenomeScript.create_ancestor()
+	var neutral_genome = base_genome.deep_copy()
+	neutral_genome.genes[0].neutral_marker += 1
+
+	var a = CellStateScript.new(1, -1, 0, 0, Vector2(4.0, 4.0), 1.0)
+	var b = CellStateScript.new(2, -1, 0, 0, Vector2(4.0, 4.0), 1.0)
+	a.genome = base_genome
+	b.genome = neutral_genome
+	a.internal_glucose = 0.2
+	b.internal_glucose = 0.2
+	a.internal_oxygen = 0.4
+	b.internal_oxygen = 0.4
+
+	var request_a: Dictionary = a.transport_requests(config.tick_dt_min, world, config)
+	var request_b: Dictionary = b.transport_requests(config.tick_dt_min, world, config)
+	_assert_true(request_a == request_b, "neutral marker does not alter membrane requests")
+	a.step_intracellular(config.tick_dt_min, config)
+	b.step_intracellular(config.tick_dt_min, config)
+	_assert_close(a.atp, b.atp, 1e-12, "neutral marker does not alter ATP physiology")
+	_assert_close(a.volume, b.volume, 1e-12, "neutral marker does not alter growth physiology")
+	_assert_close(a.damage, b.damage, 1e-12, "neutral marker does not alter damage physiology")
+
+func _test_mutation_frequency_matches_configured_probability() -> void:
+	var config = SimConfigScript.new()
+	config.promoter_mutation_rate_per_gene = 0.0
+	config.signature_mutation_rate_per_gene = 0.0
+	config.neutral_marker_mutation_rate_per_gene = 0.05
+	var rng = DeterministicRngScript.new(552211)
+	var mutator = MutationEngineScript.new()
+	var trials: int = 300
+	var loci: int = GenomeScript.create_ancestor().gene_count()
+	var observed: int = 0
+	for _i in range(trials):
+		var result: Dictionary = mutator.mutate_copy(GenomeScript.create_ancestor(), rng, config)
+		observed += int(result["events"].size())
+	var expected: float = float(trials * loci) * config.neutral_marker_mutation_rate_per_gene
+	var sigma: float = sqrt(float(trials * loci) * 0.05 * 0.95)
+	_assert_true(absf(float(observed) - expected) <= 5.0 * sigma, "realized neutral mutation count is within five sigma of configured Bernoulli rate")
+
+func _test_simulation_records_mutation_ancestry() -> void:
+	var config = _forced_mutation_config()
+	config.world_width = 16
+	config.world_height = 16
+	config.max_cells = 4
+	var sim = SimulationEngineScript.new(config)
+	sim.seed_ancestor()
+	sim.step(300)
+	_assert_true(sim.mutation_event_count() > 0, "simulation records molecular mutation events")
+	var checked: bool = false
+	for event in sim.event_log:
+		if event["kind"] == "mutation":
+			checked = true
+			_assert_true(event.has("mutation_id") and event.has("cell_id") and event.has("parent_id"), "mutation event contains stable ancestry identifiers")
+			_assert_true(event.has("parent_genotype_fingerprint") and event.has("resulting_genotype_fingerprint"), "mutation event links parental and resulting genotype")
+			break
+	_assert_true(checked, "at least one mutation event is inspectable")
+
 func _test_cell_grows_and_divides_with_resources() -> void:
 	var config = SimConfigScript.new()
 	config.world_width = 16
@@ -135,7 +267,7 @@ func _test_same_seed_reproduces_same_history() -> void:
 	second.step(500)
 
 	_assert_true(first.population_size() == second.population_size(), "same seed reproduces population size")
-	_assert_true(first.event_log.size() == second.event_log.size(), "same seed reproduces event count")
+	_assert_true(first.event_log == second.event_log, "same seed reproduces exact semantic event history")
 	_assert_close(first.checksum(), second.checksum(), 1e-9, "same seed reproduces complete state checksum")
 
 func _assert_true(condition: bool, message: String) -> void:
