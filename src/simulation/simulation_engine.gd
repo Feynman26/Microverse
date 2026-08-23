@@ -38,33 +38,25 @@ func step(tick_count: int = 1) -> void:
 
 func _step_once() -> void:
 	var dt: float = float(config.tick_dt_min)
-
-	# Phase 1: environment. Diffusion runs before cells sample this tick.
 	world.diffuse(dt)
-
-	# Phase 2: all cells request resources from the same environmental snapshot.
-	# Requests sharing a lattice location are allocated proportionally, removing
-	# iteration-order fitness artifacts under scarcity.
 	_allocate_membrane_transport(dt)
 
-	# Phase 3: intracellular physiology.
 	for cell in cells:
 		if cell.alive:
 			cell.step_intracellular(dt, config)
 
-	# Phase 4: deaths caused by physiology return only explicitly conserved
-	# transportable pools. ATP/precursor/damage are not environmental compounds
-	# in M0-M2 and are treated as dissipated/unmodelled material.
 	_process_deaths()
-
-	# Phase 5: division. A parent ceases to exist and two new cell IDs are born,
-	# keeping genealogy unambiguous from the first milestone.
 	_process_divisions()
-
 	world.assert_nonnegative()
 	tick_index += 1
 	simulation_time_min += dt
 
+# Resource allocation deliberately has three distinct phases:
+# 1) all cells request from one immutable post-diffusion snapshot;
+# 2) one scale factor is computed per grid site and chemical from that snapshot;
+# 3) the precomputed allocations are applied.
+# Recomputing the scale after each removal would make later records receive less
+# solely because of iteration order, an artificial selective advantage.
 func _allocate_membrane_transport(dt: float) -> void:
 	var records: Array = []
 	var glucose_totals: Dictionary = {}
@@ -79,23 +71,27 @@ func _allocate_membrane_transport(dt: float) -> void:
 		glucose_totals[key] = float(glucose_totals.get(key, 0.0)) + float(request["glucose"])
 		oxygen_totals[key] = float(oxygen_totals.get(key, 0.0)) + float(request["oxygen"])
 
+	var glucose_scales: Dictionary = {}
+	var oxygen_scales: Dictionary = {}
+	for key_variant in glucose_totals.keys():
+		var key: Vector2i = key_variant
+		var available: float = float(world.get_field("glucose").get_value(key.x, key.y))
+		var total_request: float = float(glucose_totals[key])
+		glucose_scales[key] = 1.0 if total_request <= available or total_request <= 0.0 else available / total_request
+	for key_variant in oxygen_totals.keys():
+		var key: Vector2i = key_variant
+		var available: float = float(world.get_field("oxygen").get_value(key.x, key.y))
+		var total_request: float = float(oxygen_totals[key])
+		oxygen_scales[key] = 1.0 if total_request <= available or total_request <= 0.0 else available / total_request
+
 	for record in records:
 		var cell = record["cell"]
 		var key: Vector2i = record["key"]
 		var request: Dictionary = record["request"]
-
-		var glucose_available: float = float(world.get_field("glucose").get_value(key.x, key.y))
-		var glucose_total: float = float(glucose_totals[key])
-		var glucose_fraction: float = 1.0 if glucose_total <= glucose_available or glucose_total <= 0.0 else glucose_available / glucose_total
-		var glucose_allocated: float = float(request["glucose"]) * glucose_fraction
+		var glucose_allocated: float = float(request["glucose"]) * float(glucose_scales[key])
+		var oxygen_allocated: float = float(request["oxygen"]) * float(oxygen_scales[key])
 		var glucose_removed: float = float(world.get_field("glucose").remove_amount(key.x, key.y, glucose_allocated))
-
-		var oxygen_available: float = float(world.get_field("oxygen").get_value(key.x, key.y))
-		var oxygen_total: float = float(oxygen_totals[key])
-		var oxygen_fraction: float = 1.0 if oxygen_total <= oxygen_available or oxygen_total <= 0.0 else oxygen_available / oxygen_total
-		var oxygen_allocated: float = float(request["oxygen"]) * oxygen_fraction
 		var oxygen_removed: float = float(world.get_field("oxygen").remove_amount(key.x, key.y, oxygen_allocated))
-
 		cell.apply_uptake(glucose_removed, oxygen_removed)
 
 func _process_deaths() -> void:
@@ -123,7 +119,7 @@ func _process_divisions() -> void:
 			continue
 		if cell.ready_to_divide(config) and projected_population < int(config.max_cells):
 			var daughters: Array = cell.create_daughters(_allocate_cell_id(), _allocate_cell_id(), tick_index, rng, world, config)
-			projected_population += 1 # one parent is replaced by two daughters
+			projected_population += 1
 			_record_event("division", {
 				"parent_id": cell.id,
 				"daughter_ids": [daughters[0].id, daughters[1].id],
