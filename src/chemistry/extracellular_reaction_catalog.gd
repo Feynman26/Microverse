@@ -3,18 +3,21 @@ class_name ExtracellularReactionCatalog
 
 const ExtracellularReactionDefinitionScript = preload("res://src/chemistry/extracellular_reaction_definition.gd")
 
-# M7-E begins with one materially balanced extracellular reaction. Extracellular
-# lipid precursor (C4) is hydrolyzed into two C2 units. The product is an
-# ordinary M7 secondary metabolite and may be imported by any cell whose
-# realized proteome happens to support C2 transport. Nothing in this reaction
-# encodes producer, beneficiary, cooperation, cheating, or ownership.
+# M7 extracellular reactions remain ordinary chemistry. E01 hydrolyzes one C4
+# lipid precursor into two C2 units. E02 converts tracked extracellular oxidant
+# into the otherwise semantically neutral X species. Neither reaction contains
+# producer, beneficiary, cooperation, cheating, detoxification-role, or
+# ownership state; those interpretations are measured only by counterfactuals.
 #
-# The reaction signature is distance 4 from the one-bit-accessible secreted
-# D136 protein used in the controlled capability assay, while remaining at least
-# distance 5 from every ancestral protein. Thus the ancestral proteome is not
-# accidentally an extracellular hydrolase even if protein material were ever
-# placed outside by an intervention.
+# E01 is distance 4 from the one-bit-accessible secreted D136 protein used in
+# M7-E while remaining outside the ancestral catalytic radius.
+# E02 is distance 4 from DACE. DACE itself is one ordinary coding-bit mutation
+# from ancestral locus 5 (5ACE -> DACE), carries the same generic Dxxx secretion
+# motif, and E02 remains distance >= 5 from every ancestral protein. D136 is
+# distance 6 from E02, preventing the M7-E public-resource enzyme from receiving
+# this detox activity for free.
 const E01_SIGNATURE: int = 0xD0F2
+const E02_SIGNATURE: int = 0xC0DE
 
 static func create_m7_candidate() -> Array:
 	return [
@@ -24,6 +27,14 @@ static func create_m7_candidate() -> Array:
 			E01_SIGNATURE,
 			{"lipids": 1.0},
 			{"carbon_c2": 2.0},
+			1.0
+		),
+		ExtracellularReactionDefinitionScript.new(
+			"E02",
+			"extracellular_oxidant_neutralization",
+			E02_SIGNATURE,
+			{"oxidant": 1.0},
+			{"neutral_x": 1.0},
 			1.0
 		)
 	]
