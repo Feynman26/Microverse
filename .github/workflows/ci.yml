@@ -78,4 +78,7 @@ jobs:
       - name: Validate M7 extracellular substrate
         run: godot --headless --path . --script tests/m7_extracellular_tests.gd
 
+      - name: Validate M7 generic membrane transport
+        run: godot --headless --path . --script tests/m7_membrane_transport_tests.gd
+
       # Frozen M5-C reproductive panels remain research evidence, not CI gates.
