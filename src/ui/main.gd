@@ -73,12 +73,12 @@ func _draw_cells() -> void:
 func _create_labels() -> void:
 	_status_label = Label.new()
 	_status_label.position = Vector2(555.0, 75.0)
-	_status_label.size = Vector2(340.0, 360.0)
+	_status_label.size = Vector2(340.0, 420.0)
 	add_child(_status_label)
 
 	_help_label = Label.new()
 	_help_label.position = Vector2(20.0, 15.0)
-	_help_label.text = "Microverse M0-M2  |  SPACE pause  |  1: 1x  2: 10x  3: 100x  4: 1000x  5: 5000x"
+	_help_label.text = "Microverse M3  |  SPACE pause  |  1: 1x  2: 10x  3: 100x  4: 1000x  5: 5000x"
 	add_child(_help_label)
 
 func _update_status() -> void:
@@ -92,6 +92,8 @@ func _update_status() -> void:
 		+ "Virtual time: %.1f min\n\n" % simulation.simulation_time_min
 		+ "Population: %d / %d\n" % [simulation.population_size(), simulation.config.max_cells]
 		+ "Max generation: %d\n" % simulation.maximum_generation()
+		+ "Genotypes alive: %d\n" % simulation.genotype_count()
+		+ "Mutation events: %d\n" % simulation.mutation_event_count()
 		+ "Total cell volume: %.3f\n\n" % simulation.total_cell_volume()
 		+ "Environmental glucose: %.2f\n" % glucose_total
 		+ "Environmental oxygen: %.2f\n\n" % oxygen_total
