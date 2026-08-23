@@ -45,6 +45,9 @@ jobs:
       - name: Validate M10 replication fidelity and genome costs
         run: godot --headless --path . --script tests/m10_replication_fidelity_tests.gd
 
+      - name: Validate M10 DNA material conservation
+        run: godot --headless --path . --script tests/m10_dna_material_tests.gd
+
       - name: Validate M10 cis-regulatory architecture
         run: godot --headless --path . --script tests/m10_cis_architecture_tests.gd
 
@@ -54,10 +57,10 @@ jobs:
       - name: Validate M10 repair-cost necessity control
         run: godot --headless --path . --script tests/m10_repair_cost_control.gd
 
-      # One-off closure characterization. Remove from routine CI after its
-      # longitudinal evidence is captured; keep the script reproducible.
-      - name: Characterize default run through sixteen-cell episode
-        run: godot --headless --path . --script tests/m10_plateau_trace.gd
+      # The one-off default 16-cell characterization remains reproducible at
+      # tests/m10_plateau_trace.gd. It is intentionally excluded from routine
+      # CI after capturing the causal evidence because it is a long experiment,
+      # not a regression gate.
 
       - name: Run invariant suite
         run: godot --headless --path . --script tests/run_tests.gd
