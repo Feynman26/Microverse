@@ -81,6 +81,14 @@ func _test_exact_forks_and_replay() -> void:
 	var verification: Dictionary = CausalLabScript.verify_replay(branch_point, int(branch_point["tick_index"]) + 11, expected_checksum)
 	_assert_true(bool(verification["matches"]), "replay verification reports checksum agreement")
 
+	var checkpoint_source = SnapshotCodecScript.restore(branch_point)
+	checkpoint_source.step(2)
+	var checkpoint_9: Dictionary = SnapshotCodecScript.capture(checkpoint_source)
+	checkpoint_source.step(2)
+	var checkpoint_11: Dictionary = SnapshotCodecScript.capture(checkpoint_source)
+	var nearest: Dictionary = CausalLabScript.nearest_prior_snapshot([checkpoint_11, branch_point, checkpoint_9], 10)
+	_assert_equal(int(nearest["tick_index"]), 9, "nearest-snapshot replay chooses the latest checkpoint not after target event")
+
 func _test_freezer_modes_and_archive_independence() -> void:
 	var sim = _make_sim(91003)
 	var source = sim.seed_ancestor(Vector2(5.0, 5.0))
@@ -155,6 +163,20 @@ func _test_competition_assay_replays_exactly() -> void:
 	_assert_true(run_a.has("division_events_by_strain") and run_a.has("death_causes_by_strain"), "competition tracks division and death distributions by lineage")
 	_assert_true(run_a.has("endpoint_fluxes_by_strain") and run_a.has("spatial_occupation"), "competition tracks flux and spatial occupation by lineage")
 	_assert_true(String(run_a["outcome"]) in ["coexistence", "fixation", "extinction"], "competition classifies coexistence/fixation/extinction without a fitness score")
+	var founder_descendant_sum: int = 0
+	for count_variant in run_a["descendants_by_founder"].values():
+		founder_descendant_sum += int(count_variant)
+	_assert_equal(founder_descendant_sum, int(run_a["final_population"]), "competition accounts for every survivor through explicit founder descent")
+
+	var batch_a: Dictionary = CausalLabScript.run_competition_batch(config, [first, second], [1, 1], environment, 4, [5001, 5002])
+	var batch_b: Dictionary = CausalLabScript.run_competition_batch(config, [first, second], [1, 1], environment, 4, [5001, 5002])
+	_assert_equal(batch_a, batch_b, "multi-seed competition batch is exactly reproducible")
+	_assert_equal(batch_a["seeds"], [5001, 5002], "competition batch preserves explicit seed panel and order")
+	_assert_equal(batch_a["runs"].size(), 2, "competition batch emits one complete run per requested seed")
+	var classified_runs: int = 0
+	for count_variant in batch_a["outcome_counts"].values():
+		classified_runs += int(count_variant)
+	_assert_equal(classified_runs, 2, "competition batch outcome counts partition every replicate")
 
 func _make_config(seed: int):
 	var config = SimConfigScript.new()
