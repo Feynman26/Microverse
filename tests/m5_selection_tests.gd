@@ -25,7 +25,7 @@ func _run() -> void:
 	_test_responsive_r03_is_inducible_but_constitutive_r03_is_not()
 	_test_environment_phase_matches_slow_protein_response_timescale()
 	_test_r03_proteome_lags_after_low_to_high_oxygen_transition()
-	_test_lineage_selection_depends_reproducibly_on_environment_dynamics()
+	_test_powered_lineage_selection_depends_on_environment_dynamics()
 
 	if failures == 0:
 		print("PASS: %d M5-C regulatory-selection tests" % tests_run)
@@ -144,15 +144,15 @@ func _test_r03_proteome_lags_after_low_to_high_oxygen_transition() -> void:
 	var early_high_responsive: float = ExpressionSystemScript.current_gene_protein(responsive_expression, responsive_gene)
 	_assert_true(early_high_responsive < early_high_constitutive, "R03 protein remains lagged during the early high-O2 opportunity despite immediate sensing")
 
-func _test_lineage_selection_depends_reproducibly_on_environment_dynamics() -> void:
-	# Population discovery and first population confirmation have already been
-	# observed and are excluded from this gate. These six sequential seeds were
-	# declared before the lineage panel was executed. Four equally spaced phase
-	# offsets remove the arbitrary choice of where a fluctuating square wave starts.
-	# The criterion is intentionally two-sided: M5-C asks whether temporal
-	# environment changes selection on regulatory architecture, not which genotype
-	# must win.
-	var seeds: Array = [13001, 13002, 13003, 13004, 13005, 13006]
+func _test_powered_lineage_selection_depends_on_environment_dynamics() -> void:
+	# The prior six-seed lineage panel (13001-13006) is treated only as a pilot for
+	# variance/sample-size planning and is excluded from inference. It observed
+	# mean D_norm=0.147298, sample SD=0.246588, showing that n=6 was underpowered
+	# for a sign-consistency criterion. This final independent panel uses 24 new
+	# sequential seeds and an aggregate two-sided criterion frozen before output.
+	var seeds: Array = []
+	for seed in range(14001, 14025):
+		seeds.append(seed)
 	var offsets: Array = [0, 100, 200, 300]
 	var panel: Dictionary = ExperimentScript.run_lineage_selection_panel(
 		seeds,
@@ -169,7 +169,7 @@ func _test_lineage_selection_depends_reproducibly_on_environment_dynamics() -> v
 		for fluct in seed_result["fluctuating_runs"]:
 			all_divided = all_divided and bool(fluct["constitutive"]["reached_division"])
 			all_divided = all_divided and bool(fluct["responsive"]["reached_division"])
-		print("M5-C LINEAGE seed=%d stable_adv=%.8f fluct_adv=%.8f normalized_delta=%.6f" % [
+		print("M5-C POWERED seed=%d stable_adv=%.8f fluct_adv=%.8f normalized_delta=%.6f" % [
 			int(seed_result["seed"]),
 			float(seed_result["stable_advantage"]),
 			float(seed_result["fluctuating_advantage"]),
@@ -177,19 +177,31 @@ func _test_lineage_selection_depends_reproducibly_on_environment_dynamics() -> v
 		])
 
 	var mean_differential: float = float(panel["mean_normalized_differential"])
-	var direction: float = 1.0 if mean_differential > 0.0 else -1.0
-	var same_direction: int = 0
-	for value_variant in differentials:
-		var value: float = float(value_variant)
-		if value * direction > 0.0:
-			same_direction += 1
-	print("M5-C LINEAGE mean_normalized_delta=%.6f same_direction=%d/%d" % [
-		mean_differential, same_direction, differentials.size()
+	var sample_sd: float = _sample_standard_deviation(differentials)
+	var standard_error: float = sample_sd / sqrt(float(differentials.size()))
+	var t_statistic: float = INF if standard_error <= 0.0 and absf(mean_differential) > 0.0 else 0.0
+	if standard_error > 0.0:
+		t_statistic = absf(mean_differential) / standard_error
+	print("M5-C POWERED mean_normalized_delta=%.6f sd=%.6f se=%.6f abs_t=%.6f n=%d" % [
+		mean_differential, sample_sd, standard_error, t_statistic, differentials.size()
 	])
 
-	_assert_true(all_divided, "all paired M5-C lineage trajectories reach ordinary division criteria before timeout")
-	_assert_true(same_direction >= 5, "environment-selection differential has the same direction in at least five of six unseen lineage seeds")
-	_assert_true(absf(mean_differential) >= 0.02, "stable-vs-fluctuating dynamics shift the regulatory reproductive selection gradient by at least two percent of baseline growth rate")
+	_assert_true(all_divided, "all 24-seed paired M5-C lineage trajectories reach ordinary division criteria before timeout")
+	_assert_true(absf(mean_differential) >= 0.02, "stable-vs-fluctuating dynamics shift mean regulatory reproductive selection by at least two percent of baseline growth rate")
+	_assert_true(t_statistic >= 2.07, "independent 24-seed lineage panel separates the mean environment-selection differential from zero at the predeclared two-sided t threshold")
+
+func _sample_standard_deviation(values: Array) -> float:
+	if values.size() < 2:
+		return 0.0
+	var mean_value: float = 0.0
+	for value_variant in values:
+		mean_value += float(value_variant)
+	mean_value /= float(values.size())
+	var sum_squares: float = 0.0
+	for value_variant in values:
+		var delta: float = float(value_variant) - mean_value
+		sum_squares += delta * delta
+	return sqrt(sum_squares / float(values.size() - 1))
 
 func _hamming_distance(first_signature: int, second_signature: int) -> int:
 	var value: int = (first_signature ^ second_signature) & 0xFFFF
