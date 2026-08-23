@@ -70,7 +70,7 @@ func _step_once() -> void:
 
 	_process_deaths()
 	_process_divisions()
-	last_mechanics_summary = CellMechanicsScript.relax(cells, world, config)
+	last_mechanics_summary = CellMechanicsScript.relax(cells, world, config, bool(config.mechanical_use_spatial_index))
 	world.assert_nonnegative()
 	tick_index += 1
 	simulation_time_min += dt
@@ -134,7 +134,6 @@ func _process_deaths() -> void:
 func _process_divisions() -> void:
 	var next_population: Array = []
 	var projected_population: int = cells.size()
-
 	for cell in cells:
 		if not cell.alive:
 			continue
@@ -147,7 +146,6 @@ func _process_divisions() -> void:
 				"daughter_ids": [daughters[0].id, daughters[1].id],
 				"generation": cell.generation + 1
 			})
-
 			for daughter in daughters:
 				var parent_fingerprint: int = int(cell.genome.fingerprint())
 				var mutation_result: Dictionary = mutation_engine.mutate_copy(daughter.genome, rng, config)
@@ -171,11 +169,10 @@ func _process_divisions() -> void:
 			next_population.append_array(daughters)
 		else:
 			next_population.append(cell)
-
 	cells = next_population
 
 func relax_mechanics() -> Dictionary:
-	last_mechanics_summary = CellMechanicsScript.relax(cells, world, config)
+	last_mechanics_summary = CellMechanicsScript.relax(cells, world, config, bool(config.mechanical_use_spatial_index))
 	return last_mechanics_summary
 
 func maximum_overlap() -> float:

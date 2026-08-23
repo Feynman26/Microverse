@@ -36,7 +36,6 @@ var initial_adp_per_volume: float = 8.0
 var initial_nad_per_volume: float = 6.0
 var initial_nadh_per_volume: float = 1.0
 
-# M5-A canonical stochastic expression.
 var transcription_max_events_per_min: float = 1.0
 var mrna_decay_rate_per_min: float = 0.25
 var translation_events_per_mrna_per_min: float = 2.0
@@ -47,14 +46,9 @@ var transcription_nuc_cost_per_event: float = 0.002
 var translation_atp_cost_per_event: float = 0.003
 var translation_aa_cost_per_event: float = 0.001
 var expression_partition_noise_scale: float = 0.12
-
-# M5-C finite proteome budget.
 var proteome_capacity_reference_units: float = 5.0
-
-# Shared translation machinery.
 var translation_capacity_fraction_of_proteome_per_min: float = 0.06
 
-# M5-B generic promoter regulation.
 var regulation_enabled: bool = true
 var regulatory_max_distance: int = 3
 var regulatory_distance_decay: float = 0.80
@@ -62,7 +56,6 @@ var regulatory_gain: float = 0.60
 var regulatory_min_factor: float = 0.25
 var regulatory_max_factor: float = 1.75
 
-# M5-B generic chemical sensing.
 var allostery_enabled: bool = true
 var allosteric_max_distance: int = 2
 var allosteric_distance_decay: float = 0.90
@@ -85,12 +78,13 @@ var division_atp_cost: float = 1.0
 var partition_jitter: float = 0.02
 var daughter_offset_grid: float = 0.20
 
-# M6 physical-cell mechanics. In 2D, structural volume is interpreted as
-# occupied area, so radius scales with sqrt(volume/ancestor_volume).
+# M6 physical-cell mechanics and broad-phase indexing.
 var ancestor_radius_grid: float = 0.45
 var mechanical_relaxation_iterations: int = 16
 var mechanical_relaxation_fraction: float = 0.80
 var mechanical_overlap_tolerance: float = 1e-4
+var mechanical_use_spatial_index: bool = true
+var mechanical_neighbor_bucket_size_grid: float = 2.0
 
 var mutation_enabled: bool = true
 var promoter_mutation_rate_per_gene: float = 0.001
@@ -143,6 +137,7 @@ func validate() -> void:
 	assert(mechanical_relaxation_iterations >= 1)
 	assert(mechanical_relaxation_fraction > 0.0 and mechanical_relaxation_fraction <= 1.0)
 	assert(mechanical_overlap_tolerance >= 0.0)
+	assert(mechanical_neighbor_bucket_size_grid > 0.0)
 	assert(2.0 * ancestor_radius_grid < float(mini(world_width - 1, world_height - 1)))
 	assert(promoter_mutation_rate_per_gene >= 0.0 and promoter_mutation_rate_per_gene <= 1.0)
 	assert(signature_mutation_rate_per_gene >= 0.0 and signature_mutation_rate_per_gene <= 1.0)
