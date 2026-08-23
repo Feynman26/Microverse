@@ -209,6 +209,9 @@ static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, c
 static func _regulation_factor(target_gene, state_snapshot: Dictionary, pools: Dictionary, config, cell_volume: float = 1.0) -> float:
 	if not bool(config.regulation_enabled):
 		return 1.0
+	var regulatory_site_copies: int = int(target_gene.regulatory_copy_number)
+	if regulatory_site_copies <= 0:
+		return 1.0
 	var activator: float = 0.0
 	var repressor: float = 0.0
 	var reference_protein: float = maxf(
@@ -229,7 +232,14 @@ static func _regulation_factor(target_gene, state_snapshot: Dictionary, pools: D
 				continue
 			var abundance: float = maxf(0.0, float(cohorts[signature_variant])) / reference_protein
 			var affinity: float = exp(-float(config.regulatory_distance_decay) * float(distance))
-			var occupancy: float = abundance * affinity * _allosteric_factor(signature, pools, config, cell_volume)
+			# Identical duplicated binding regions contribute independent occupancy
+			# opportunities; deletion to zero removes the cis edge entirely.
+			var occupancy: float = (
+				abundance
+				* affinity
+				* _allosteric_factor(signature, pools, config, cell_volume)
+				* float(regulatory_site_copies)
+			)
 			if (signature & 0x8000) == 0:
 				activator += occupancy
 			else:
