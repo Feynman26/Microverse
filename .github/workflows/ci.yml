@@ -72,4 +72,7 @@ jobs:
       - name: Validate M6 spatial broad phase
         run: godot --headless --path . --script tests/m6_spatial_index_tests.gd
 
+      - name: Validate M6 spatial ecology
+        run: godot --headless --path . --script tests/m6_spatial_ecology_tests.gd
+
       # Frozen M5-C reproductive panels remain research evidence, not CI gates.
