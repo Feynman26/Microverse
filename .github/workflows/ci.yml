@@ -60,8 +60,11 @@ jobs:
       - name: Validate M5 shared translation capacity
         run: godot --headless --path . --script tests/m5_translation_capacity_tests.gd
 
-      - name: Validate M5-C ROS circuit mechanics
+      - name: Preserve M5-C ROS circuit mechanics gate
         run: godot --headless --path . --script tests/m5c_ros_circuit_tests.gd
 
-      - name: Validate final M5-C reproductive success
-        run: godot --headless --path . --script tests/m5c_reproductive_success_confirmation.gd
+      - name: Validate M5-C expression-burden mechanics
+        run: godot --headless --path . --script tests/m5c_burden_mechanics_tests.gd
+
+      - name: Validate final M5-C environment-dependent reproductive outcome
+        run: godot --headless --path . --script tests/m5c_burden_confirmation.gd
