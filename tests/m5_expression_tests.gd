@@ -21,6 +21,7 @@ func _run() -> void:
 	_test_expression_has_energy_and_material_cost()
 	_test_expression_turnover_conserves_structural_material()
 	_test_generic_activation_and_repression()
+	_test_generic_metabolite_sensing_changes_regulation()
 	_test_expression_noise_is_seed_reproducible()
 	_test_expression_partition_conserves_state()
 	_test_regulatory_motif_mutation_changes_network_genotype()
@@ -88,6 +89,7 @@ func _test_expression_turnover_conserves_structural_material() -> void:
 func _test_generic_activation_and_repression() -> void:
 	var config = SimConfigScript.new()
 	config.expression_noise_fraction = 0.0
+	config.allostery_enabled = false
 	config.regulatory_gain = 0.5
 	var activator = GeneScript.new(1, 5000, 0x1234, 1, 0x0000)
 	var repressor = GeneScript.new(2, 5000, 0x9234, 2, 0x0000)
@@ -98,11 +100,34 @@ func _test_generic_activation_and_repression() -> void:
 	state.proteins[1] = 2.0; state.proteins[2] = 2.0
 	var pools: Dictionary = MetabolicSolverScript.create_initial_pools(1.0, config)
 	pools["ATP"] = 20.0; pools["AA"] = 20.0; pools["NUC"] = 20.0
-	var rng = DeterministicRngScript.new(22)
-	var stats: Dictionary = ExpressionSolverScript.step(state, genome, pools, 0.1, rng, config)
+	var stats: Dictionary = ExpressionSolverScript.step(state, genome, pools, 0.1, DeterministicRngScript.new(22), config)
 	var factors: Dictionary = stats["regulation"]
 	_assert_true(float(factors[3]) > 1.0, "matching low-high-bit protein generically activates target promoter")
 	_assert_true(float(factors[4]) < 1.0, "matching high-bit protein generically represses target promoter")
+
+func _test_generic_metabolite_sensing_changes_regulation() -> void:
+	var config = SimConfigScript.new()
+	config.expression_noise_fraction = 0.0
+	config.regulatory_gain = 0.8
+	config.allosteric_gain = 1.0
+	# Protein 0x0000 both binds the target motif and exactly binds G's neutral
+	# ligand signature. It has no semantic label such as glucose_sensor.
+	var regulator = GeneScript.new(1, 6000, 0x0000, 1, 0xBEEF)
+	var target = GeneScript.new(2, 5000, 0x2222, 2, 0x0000)
+	var genome = GenomeScript.new([regulator, target])
+	var low_state = ExpressionSolverScript.initialize(genome, config)
+	var high_state = low_state.deep_copy()
+	low_state.proteins[1] = 1.0; high_state.proteins[1] = 1.0
+	var low_pools: Dictionary = MetabolicSolverScript.create_initial_pools(1.0, config)
+	var high_pools: Dictionary = low_pools.duplicate(true)
+	for pools in [low_pools, high_pools]:
+		pools["ATP"] = 20.0; pools["AA"] = 20.0; pools["NUC"] = 20.0
+	low_pools["G"] = 0.0
+	high_pools["G"] = 5.0
+	var low_stats: Dictionary = ExpressionSolverScript.step(low_state, genome, low_pools, 0.1, DeterministicRngScript.new(55), config)
+	var high_stats: Dictionary = ExpressionSolverScript.step(high_state, genome, high_pools, 0.1, DeterministicRngScript.new(55), config)
+	_assert_true(float(high_stats["regulation"][2]) > float(low_stats["regulation"][2]), "ordinary ligand binding makes the same regulatory circuit environment-conditioned")
+	_assert_true(high_state.mrna_for(2) > low_state.mrna_for(2), "chemical sensing changes downstream molecular phenotype without a named response API")
 
 func _test_expression_noise_is_seed_reproducible() -> void:
 	var config = SimConfigScript.new(); config.regulation_enabled = false; config.expression_noise_fraction = 0.25
