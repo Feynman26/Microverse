@@ -231,10 +231,11 @@ func create_daughters(first_id: int, second_id: int, tick: int, rng, world, conf
 
 # Lysis exposes every metabolite that has a physical extracellular field. BIO
 # is not discarded: it is hydrolyzed into the exact precursor stoichiometry of
-# the reverse structural-biomass reaction (2 AA + 1 LIP + 2 NUC per BIO), which
-# preserves the digital C/N/P bookkeeping exactly without creating a dedicated
-# "corpse nutrient" resource or ecological behavior flag.
-func releasable_pools() -> Dictionary:
+# the reverse structural-biomass reaction (2 AA + 1 LIP + 2 NUC per BIO). The
+# material physically stored in mRNA and protein is also returned to NUC and AA
+# using the same per-molecule accounting used by M5 expression. Together these
+# operations conserve the model's structural C/N/P across cell death.
+func releasable_pools(config) -> Dictionary:
 	var result: Dictionary = {}
 	for metabolite_id in MetaboliteCatalogScript.extracellular_ids():
 		var field_name: String = MetaboliteCatalogScript.extracellular_field(metabolite_id)
@@ -244,9 +245,17 @@ func releasable_pools() -> Dictionary:
 	var aa_field: String = MetaboliteCatalogScript.extracellular_field("AA")
 	var lip_field: String = MetaboliteCatalogScript.extracellular_field("LIP")
 	var nuc_field: String = MetaboliteCatalogScript.extracellular_field("NUC")
-	result[aa_field] = float(result.get(aa_field, 0.0)) + 2.0 * structural_biomass
+	result[aa_field] = (
+		float(result.get(aa_field, 0.0))
+		+ 2.0 * structural_biomass
+		+ total_protein() * float(config.translation_aa_cost_per_event)
+	)
 	result[lip_field] = float(result.get(lip_field, 0.0)) + structural_biomass
-	result[nuc_field] = float(result.get(nuc_field, 0.0)) + 2.0 * structural_biomass
+	result[nuc_field] = (
+		float(result.get(nuc_field, 0.0))
+		+ 2.0 * structural_biomass
+		+ total_mrna() * float(config.transcription_nuc_cost_per_event)
+	)
 	return result
 
 func total_adenylate() -> float:
