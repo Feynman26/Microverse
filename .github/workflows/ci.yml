@@ -66,5 +66,5 @@ jobs:
       - name: Validate M5-C expression-burden mechanics
         run: godot --headless --path . --script tests/m5c_burden_mechanics_tests.gd
 
-      - name: Validate final M5-C environment-dependent reproductive outcome
-        run: godot --headless --path . --script tests/m5c_burden_confirmation.gd
+      - name: Validate robust final M5-C environment-dependent reproductive outcome
+        run: godot --headless --path . --script tests/m5c_burden_robust_confirmation.gd
