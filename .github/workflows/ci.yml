@@ -108,3 +108,6 @@ jobs:
 
       - name: Validate compact M9 exact causal laboratory
         run: godot --headless --path . --script tests/m9_causal_lab_tests.gd
+
+      - name: Profile default visual-run longitudinal dynamics
+        run: godot --headless --path . --script tests/m10_baseline_trace.gd
