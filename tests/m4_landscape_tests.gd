@@ -18,7 +18,7 @@ func _run() -> void:
 	_test_catalog_scope(reactions)
 	_test_all_reactions_close_structural_balance(reactions)
 	_test_ancestral_accessibility_pattern(reactions)
-	_test_dormant_recovery_is_one_mutation_from_activity(reactions)
+	_test_dormant_recovery_is_genome_wide_and_one_mutation_away(reactions)
 	_test_single_bit_neighbors_preserve_local_continuity(reactions)
 	_test_random_landscape_density_is_sparse_but_connected(reactions)
 
@@ -30,9 +30,9 @@ func _run() -> void:
 		quit(1)
 
 func _test_catalog_scope(reactions: Array) -> void:
-	_assert_true(MetaboliteCatalogScript.ids().size() == 18, "candidate chemistry defines eighteen primitive metabolites")
-	_assert_true(reactions.size() == 11, "candidate chemistry defines eleven catalytic reactions")
-	_assert_true(ReactionCatalogScript.by_id(reactions, "R01") != null, "reaction IDs are addressable")
+	_assert_true(MetaboliteCatalogScript.ids().size() == 19, "M4 chemistry defines nineteen primitive/structural metabolites")
+	_assert_true(reactions.size() == 12, "M4 chemistry defines twelve catalytic reactions including biomass assembly")
+	_assert_true(ReactionCatalogScript.by_id(reactions, "R12") != null, "structural biomass assembly is in the reaction catalog")
 
 func _test_all_reactions_close_structural_balance(reactions: Array) -> void:
 	var balanced: bool = true
@@ -40,13 +40,14 @@ func _test_all_reactions_close_structural_balance(reactions: Array) -> void:
 		if not reaction.is_structurally_balanced():
 			balanced = false
 			break
-	_assert_true(balanced, "all M4 candidate reactions conserve digital C/N/P structural units")
+	_assert_true(balanced, "all M4 reactions conserve digital C/N/P structural units")
 
 func _test_ancestral_accessibility_pattern(reactions: Array) -> void:
 	var ancestor = GenomeScript.create_ancestor()
 	var exact_expectations: Dictionary = {
 		"R01": 1, "R02": 2, "R03": 3,
-		"R06": 5, "R07": 6, "R08": 7, "R09": 8
+		"R06": 5, "R07": 6, "R08": 7, "R09": 8,
+		"R12": 10
 	}
 	var exact_ok: bool = true
 	for reaction_id in exact_expectations.keys():
@@ -56,27 +57,29 @@ func _test_ancestral_accessibility_pattern(reactions: Array) -> void:
 		if CatalyticLandscapeScript.hamming_distance(int(gene.protein_signature), int(reaction.signature)) != 0:
 			exact_ok = false
 			break
-	_assert_true(exact_ok, "ancestral core reactions have exact catalytic matches")
+	_assert_true(exact_ok, "ancestral core and biomass reactions have exact catalytic matches")
 
 	var fermentation = ReactionCatalogScript.by_id(reactions, "R04")
 	var overflow = ReactionCatalogScript.by_id(reactions, "R10")
 	var gene4 = ancestor.get_gene_by_locus(4)
 	var gene9 = ancestor.get_gene_by_locus(9)
-	_assert_true(CatalyticLandscapeScript.hamming_distance(gene4.protein_signature, fermentation.signature) == 3, "ancestral fermentation is a weak but active side route")
-	_assert_true(CatalyticLandscapeScript.hamming_distance(gene9.protein_signature, overflow.signature) == 3, "ancestral W2 overflow is a weak but active side route")
+	_assert_true(CatalyticLandscapeScript.hamming_distance(gene4.protein_signature, fermentation.signature) == 3, "ancestral fermentation is a weak active side route")
+	_assert_true(CatalyticLandscapeScript.hamming_distance(gene9.protein_signature, overflow.signature) == 3, "ancestral W2 overflow is a weak active side route")
 
+func _test_dormant_recovery_is_genome_wide_and_one_mutation_away(reactions: Array) -> void:
+	var ancestor = GenomeScript.create_ancestor()
 	var recovery1 = ReactionCatalogScript.by_id(reactions, "R05")
 	var recovery2 = ReactionCatalogScript.by_id(reactions, "R11")
-	_assert_true(CatalyticLandscapeScript.hamming_distance(gene4.protein_signature, recovery1.signature) == 5, "W1 recovery begins just outside active radius")
-	_assert_true(CatalyticLandscapeScript.hamming_distance(gene9.protein_signature, recovery2.signature) == 5, "W2 recovery begins just outside active radius")
-	_assert_close(CatalyticLandscapeScript.affinity(gene4.protein_signature, recovery1.signature), 0.0, 1e-12, "dormant W1 recovery has zero ancestral activity")
-	_assert_close(CatalyticLandscapeScript.affinity(gene9.protein_signature, recovery2.signature), 0.0, 1e-12, "dormant W2 recovery has zero ancestral activity")
+	var gene4 = ancestor.get_gene_by_locus(4)
+	var gene9 = ancestor.get_gene_by_locus(9)
+	_assert_true(CatalyticLandscapeScript.hamming_distance(gene4.protein_signature, recovery1.signature) == 5, "W1 recovery begins one mutation outside active radius")
+	_assert_true(CatalyticLandscapeScript.hamming_distance(gene9.protein_signature, recovery2.signature) == 5, "W2 recovery begins one mutation outside active radius")
+	_assert_close(CatalyticLandscapeScript.genome_activity(ancestor, recovery1), 0.0, 1e-12, "W1 recovery is dormant across the complete ancestral proteome")
+	_assert_close(CatalyticLandscapeScript.genome_activity(ancestor, recovery2), 0.0, 1e-12, "W2 recovery is dormant across the complete ancestral proteome")
 
-func _test_dormant_recovery_is_one_mutation_from_activity(reactions: Array) -> void:
-	var ancestor = GenomeScript.create_ancestor()
 	var pairs: Array = [
-		[ancestor.get_gene_by_locus(4).protein_signature, ReactionCatalogScript.by_id(reactions, "R05").signature],
-		[ancestor.get_gene_by_locus(9).protein_signature, ReactionCatalogScript.by_id(reactions, "R11").signature]
+		[gene4.protein_signature, recovery1.signature],
+		[gene9.protein_signature, recovery2.signature]
 	]
 	var accessible: bool = true
 	for pair in pairs:
@@ -96,7 +99,7 @@ func _test_dormant_recovery_is_one_mutation_from_activity(reactions: Array) -> v
 			accessible = false
 		if CatalyticLandscapeScript.affinity(mutant_signature, reaction_signature) <= 0.0:
 			accessible = false
-	_assert_true(accessible, "each dormant waste-recovery route is reachable by one coding bit flip")
+	_assert_true(accessible, "each dormant recovery route becomes active after one appropriate coding mutation")
 
 func _test_single_bit_neighbors_preserve_local_continuity(reactions: Array) -> void:
 	var reaction = ReactionCatalogScript.by_id(reactions, "R01")

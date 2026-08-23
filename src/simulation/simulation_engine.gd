@@ -7,11 +7,15 @@ const WorldStateScript = preload("res://src/world/world_state.gd")
 const CellStateScript = preload("res://src/biology/cell_state.gd")
 const GenomeScript = preload("res://src/genetics/genome.gd")
 const MutationEngineScript = preload("res://src/genetics/mutation_engine.gd")
+const ReactionCatalogScript = preload("res://src/chemistry/reaction_catalog.gd")
+
+const TRANSPORTED_RESOURCES: Array[String] = ["glucose", "oxygen", "nitrogen", "phosphorus"]
 
 var config
 var rng
 var world
 var mutation_engine
+var reactions: Array = []
 var cells: Array = []
 var tick_index: int = 0
 var simulation_time_min: float = 0.0
@@ -24,15 +28,20 @@ func _init(p_config = null) -> void:
 	config.validate()
 	rng = DeterministicRngScript.new(config.seed)
 	mutation_engine = MutationEngineScript.new()
+	reactions = ReactionCatalogScript.create_m4_candidate()
+	ReactionCatalogScript.validate_unique(reactions)
 	world = WorldStateScript.new(config.world_width, config.world_height, config.grid_cell_size_um)
 	world.register_field("glucose", config.glucose_diffusion, config.initial_glucose)
 	world.register_field("oxygen", config.oxygen_diffusion, config.initial_oxygen)
+	world.register_field("nitrogen", config.nitrogen_diffusion, config.initial_nitrogen)
+	world.register_field("phosphorus", config.phosphorus_diffusion, config.initial_phosphorus)
 
 func seed_ancestor(position: Vector2 = Vector2(-1.0, -1.0)):
 	if position.x < 0.0 or position.y < 0.0:
 		position = Vector2(float(config.world_width - 1) * 0.5, float(config.world_height - 1) * 0.5)
 	var cell = CellStateScript.new(_allocate_cell_id(), -1, 0, tick_index, world.clamp_position(position), config.ancestor_volume)
 	cell.genome = GenomeScript.create_ancestor()
+	cell.initialize_metabolism(config)
 	cells.append(cell)
 	_record_event("birth", {
 		"cell_id": cell.id,
@@ -54,7 +63,7 @@ func _step_once() -> void:
 
 	for cell in cells:
 		if cell.alive:
-			cell.step_intracellular(dt, config)
+			cell.step_intracellular(dt, config, reactions)
 
 	_process_deaths()
 	_process_divisions()
@@ -62,10 +71,14 @@ func _step_once() -> void:
 	tick_index += 1
 	simulation_time_min += dt
 
+# All transported resources use the same request -> site-scale -> application
+# protocol. Availability is sampled once after diffusion; no cell receives a
+# priority merely because it is earlier in the array.
 func _allocate_membrane_transport(dt: float) -> void:
 	var records: Array = []
-	var glucose_totals: Dictionary = {}
-	var oxygen_totals: Dictionary = {}
+	var totals: Dictionary = {}
+	for resource in TRANSPORTED_RESOURCES:
+		totals[resource] = {}
 
 	for cell in cells:
 		if not cell.alive:
@@ -73,31 +86,32 @@ func _allocate_membrane_transport(dt: float) -> void:
 		var request: Dictionary = cell.transport_requests(dt, world, config)
 		var key: Vector2i = _grid_key(cell.position)
 		records.append({"cell": cell, "key": key, "request": request})
-		glucose_totals[key] = float(glucose_totals.get(key, 0.0)) + float(request["glucose"])
-		oxygen_totals[key] = float(oxygen_totals.get(key, 0.0)) + float(request["oxygen"])
+		for resource in TRANSPORTED_RESOURCES:
+			var resource_totals: Dictionary = totals[resource]
+			resource_totals[key] = float(resource_totals.get(key, 0.0)) + float(request.get(resource, 0.0))
+			totals[resource] = resource_totals
 
-	var glucose_scales: Dictionary = {}
-	var oxygen_scales: Dictionary = {}
-	for key_variant in glucose_totals.keys():
-		var key: Vector2i = key_variant
-		var available: float = float(world.get_field("glucose").get_value(key.x, key.y))
-		var total_request: float = float(glucose_totals[key])
-		glucose_scales[key] = 1.0 if total_request <= available or total_request <= 0.0 else available / total_request
-	for key_variant in oxygen_totals.keys():
-		var key: Vector2i = key_variant
-		var available: float = float(world.get_field("oxygen").get_value(key.x, key.y))
-		var total_request: float = float(oxygen_totals[key])
-		oxygen_scales[key] = 1.0 if total_request <= available or total_request <= 0.0 else available / total_request
+	var scales: Dictionary = {}
+	for resource in TRANSPORTED_RESOURCES:
+		var resource_scales: Dictionary = {}
+		var resource_totals: Dictionary = totals[resource]
+		for key_variant in resource_totals.keys():
+			var key: Vector2i = key_variant
+			var available: float = float(world.get_field(resource).get_value(key.x, key.y))
+			var total_request: float = float(resource_totals[key])
+			resource_scales[key] = 1.0 if total_request <= available or total_request <= 0.0 else available / total_request
+		scales[resource] = resource_scales
 
 	for record in records:
 		var cell = record["cell"]
 		var key: Vector2i = record["key"]
 		var request: Dictionary = record["request"]
-		var glucose_allocated: float = float(request["glucose"]) * float(glucose_scales[key])
-		var oxygen_allocated: float = float(request["oxygen"]) * float(oxygen_scales[key])
-		var glucose_removed: float = float(world.get_field("glucose").remove_amount(key.x, key.y, glucose_allocated))
-		var oxygen_removed: float = float(world.get_field("oxygen").remove_amount(key.x, key.y, oxygen_allocated))
-		cell.apply_uptake(glucose_removed, oxygen_removed)
+		var uptake: Dictionary = {}
+		for resource in TRANSPORTED_RESOURCES:
+			var resource_scales: Dictionary = scales[resource]
+			var allocated: float = float(request.get(resource, 0.0)) * float(resource_scales.get(key, 1.0))
+			uptake[resource] = float(world.get_field(resource).remove_amount(key.x, key.y, allocated))
+		cell.apply_uptake(uptake)
 
 func _process_deaths() -> void:
 	var survivors: Array = []
@@ -106,8 +120,8 @@ func _process_deaths() -> void:
 			survivors.append(cell)
 			continue
 		var pools: Dictionary = cell.releasable_pools()
-		world.release("glucose", cell.position, float(pools["glucose"]))
-		world.release("oxygen", cell.position, float(pools["oxygen"]))
+		for resource in TRANSPORTED_RESOURCES:
+			world.release(resource, cell.position, float(pools.get(resource, 0.0)))
 		_record_event("death", {
 			"cell_id": cell.id,
 			"generation": cell.generation,

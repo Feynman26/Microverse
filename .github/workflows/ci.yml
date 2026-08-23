@@ -41,3 +41,6 @@ jobs:
 
       - name: Characterize M4 catalytic landscape
         run: godot --headless --path . --script tests/m4_landscape_tests.gd
+
+      - name: Validate M4 metabolic integration
+        run: godot --headless --path . --script tests/m4_metabolism_tests.gd
