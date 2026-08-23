@@ -84,3 +84,20 @@ static func desired_exchange(
 		)
 		return minf(proposed, intracellular_capacity)
 	return -minf(proposed, internal_amount)
+
+static func total_movement(exchanges: Dictionary) -> float:
+	var result: float = 0.0
+	for value in exchanges.values():
+		result += absf(float(value))
+	return result
+
+static func movement_cost(moved_units: float, config) -> float:
+	return maxf(0.0, moved_units) * float(config.secondary_transport_atp_cost_per_unit)
+
+# All simultaneous secondary transport proposals from one cell share its ATP
+# pool proportionally. No metabolite is privileged by iteration order.
+static func energy_scale(exchanges: Dictionary, available_atp: float, config) -> float:
+	var demand: float = movement_cost(total_movement(exchanges), config)
+	if demand <= 0.0:
+		return 1.0
+	return minf(1.0, maxf(0.0, available_atp) / demand)
