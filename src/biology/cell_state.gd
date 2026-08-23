@@ -22,14 +22,7 @@ var volume: float = 1.0
 var damage: float = 0.0
 var energy_debt: float = 0.0
 
-func _init(
-	p_id: int = 0,
-	p_parent_id: int = -1,
-	p_generation: int = 0,
-	p_birth_tick: int = 0,
-	p_position: Vector2 = Vector2.ZERO,
-	p_volume: float = 1.0
-) -> void:
+func _init(p_id: int = 0, p_parent_id: int = -1, p_generation: int = 0, p_birth_tick: int = 0, p_position: Vector2 = Vector2.ZERO, p_volume: float = 1.0) -> void:
 	id = p_id
 	parent_id = p_parent_id
 	generation = p_generation
@@ -82,7 +75,7 @@ func step_intracellular(dt: float, config, reactions: Array, rng = null) -> void
 	assert(genome != null and expression_state != null)
 	assert(not metabolites.is_empty())
 	last_expression_stats = ExpressionSolverScript.step(expression_state, genome, metabolites, dt, rng, config)
-	last_fluxes = MetabolicSolverScript.step(metabolites, genome, reactions, dt, volume, config, expression_state.proteins)
+	last_fluxes = MetabolicSolverScript.step(metabolites, genome, reactions, dt, volume, config, {}, expression_state.protein_cohorts)
 	_sync_volume_from_biomass(config)
 	_pay_maintenance(dt, config)
 	_update_damage_and_repair(dt, config)
@@ -93,10 +86,8 @@ func _pay_maintenance(dt: float, config) -> void:
 	var required: float = float(config.maintenance_atp_rate_per_volume) * volume * dt
 	var paid: float = MetabolicSolverScript.spend_atp(metabolites, required)
 	var unmet: float = required - paid
-	if unmet > 0.0:
-		energy_debt += unmet
-	else:
-		energy_debt = maxf(0.0, energy_debt - required * 0.25)
+	if unmet > 0.0: energy_debt += unmet
+	else: energy_debt = maxf(0.0, energy_debt - required * 0.25)
 
 func _update_damage_and_repair(dt: float, config) -> void:
 	var current_ros: float = pool("ROS")
@@ -106,8 +97,7 @@ func _update_damage_and_repair(dt: float, config) -> void:
 	var possible_repair: float = minf(damage, float(config.basal_repair_rate) * dt)
 	var requested_cost: float = possible_repair * float(config.repair_atp_cost)
 	var paid: float = MetabolicSolverScript.spend_atp(metabolites, requested_cost)
-	if requested_cost > 0.0:
-		possible_repair *= paid / requested_cost
+	if requested_cost > 0.0: possible_repair *= paid / requested_cost
 	damage = maxf(0.0, damage - possible_repair)
 
 func _sync_volume_from_biomass(config) -> void:
@@ -129,12 +119,10 @@ func create_daughters(first_id: int, second_id: int, tick: int, rng, world, conf
 	assert(ready_to_divide(config))
 	assert(expression_state != null)
 	MetabolicSolverScript.spend_atp(metabolites, float(config.division_atp_cost))
-	var partition_jitter: float = float(config.partition_jitter)
-	var ratio: float = 0.5 + float(rng.randf_range(-partition_jitter, partition_jitter))
+	var ratio: float = 0.5 + float(rng.randf_range(-float(config.partition_jitter), float(config.partition_jitter)))
 	var offset_scale: float = float(config.daughter_offset_grid)
 	var first_offset: Vector2 = Vector2(float(rng.randf_range(-1.0, 1.0)), float(rng.randf_range(-1.0, 1.0))).normalized() * offset_scale
-	if first_offset == Vector2.ZERO:
-		first_offset = Vector2(offset_scale, 0.0)
+	if first_offset == Vector2.ZERO: first_offset = Vector2(offset_scale, 0.0)
 	var second_offset: Vector2 = -first_offset
 	var pool_partitions: Array = MetabolicSolverScript.partition(metabolites, ratio)
 	var expression_partitions: Array = ExpressionSolverScript.partition(expression_state, ratio, rng, config)
