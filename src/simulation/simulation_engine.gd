@@ -37,7 +37,7 @@ func step(tick_count: int = 1) -> void:
 		_step_once()
 
 func _step_once() -> void:
-	var dt: float = config.tick_dt_min
+	var dt: float = float(config.tick_dt_min)
 
 	# Phase 1: environment. Diffusion runs before cells sample this tick.
 	world.diffuse(dt)
@@ -74,7 +74,7 @@ func _allocate_membrane_transport(dt: float) -> void:
 		if not cell.alive:
 			continue
 		var request: Dictionary = cell.transport_requests(dt, world, config)
-		var key := _grid_key(cell.position)
+		var key: Vector2i = _grid_key(cell.position)
 		records.append({"cell": cell, "key": key, "request": request})
 		glucose_totals[key] = float(glucose_totals.get(key, 0.0)) + float(request["glucose"])
 		oxygen_totals[key] = float(oxygen_totals.get(key, 0.0)) + float(request["oxygen"])
@@ -84,17 +84,17 @@ func _allocate_membrane_transport(dt: float) -> void:
 		var key: Vector2i = record["key"]
 		var request: Dictionary = record["request"]
 
-		var glucose_available: float = world.get_field("glucose").get_value(key.x, key.y)
-		var glucose_total: float = glucose_totals[key]
-		var glucose_fraction := 1.0 if glucose_total <= glucose_available or glucose_total <= 0.0 else glucose_available / glucose_total
-		var glucose_allocated := float(request["glucose"]) * glucose_fraction
-		var glucose_removed: float = world.get_field("glucose").remove_amount(key.x, key.y, glucose_allocated)
+		var glucose_available: float = float(world.get_field("glucose").get_value(key.x, key.y))
+		var glucose_total: float = float(glucose_totals[key])
+		var glucose_fraction: float = 1.0 if glucose_total <= glucose_available or glucose_total <= 0.0 else glucose_available / glucose_total
+		var glucose_allocated: float = float(request["glucose"]) * glucose_fraction
+		var glucose_removed: float = float(world.get_field("glucose").remove_amount(key.x, key.y, glucose_allocated))
 
-		var oxygen_available: float = world.get_field("oxygen").get_value(key.x, key.y)
-		var oxygen_total: float = oxygen_totals[key]
-		var oxygen_fraction := 1.0 if oxygen_total <= oxygen_available or oxygen_total <= 0.0 else oxygen_available / oxygen_total
-		var oxygen_allocated := float(request["oxygen"]) * oxygen_fraction
-		var oxygen_removed: float = world.get_field("oxygen").remove_amount(key.x, key.y, oxygen_allocated)
+		var oxygen_available: float = float(world.get_field("oxygen").get_value(key.x, key.y))
+		var oxygen_total: float = float(oxygen_totals[key])
+		var oxygen_fraction: float = 1.0 if oxygen_total <= oxygen_available or oxygen_total <= 0.0 else oxygen_available / oxygen_total
+		var oxygen_allocated: float = float(request["oxygen"]) * oxygen_fraction
+		var oxygen_removed: float = float(world.get_field("oxygen").remove_amount(key.x, key.y, oxygen_allocated))
 
 		cell.apply_uptake(glucose_removed, oxygen_removed)
 
@@ -116,12 +116,12 @@ func _process_deaths() -> void:
 
 func _process_divisions() -> void:
 	var next_population: Array = []
-	var projected_population := cells.size()
+	var projected_population: int = cells.size()
 
 	for cell in cells:
 		if not cell.alive:
 			continue
-		if cell.ready_to_divide(config) and projected_population < config.max_cells:
+		if cell.ready_to_divide(config) and projected_population < int(config.max_cells):
 			var daughters: Array = cell.create_daughters(_allocate_cell_id(), _allocate_cell_id(), tick_index, rng, world, config)
 			projected_population += 1 # one parent is replaced by two daughters
 			_record_event("division", {
@@ -143,17 +143,17 @@ func _process_divisions() -> void:
 
 func _grid_key(position: Vector2) -> Vector2i:
 	return Vector2i(
-		clampi(roundi(position.x), 0, config.world_width - 1),
-		clampi(roundi(position.y), 0, config.world_height - 1)
+		clampi(roundi(position.x), 0, int(config.world_width) - 1),
+		clampi(roundi(position.y), 0, int(config.world_height) - 1)
 	)
 
 func _allocate_cell_id() -> int:
-	var result := next_cell_id
+	var result: int = next_cell_id
 	next_cell_id += 1
 	return result
 
 func _record_event(kind: String, payload: Dictionary) -> void:
-	var event := payload.duplicate(true)
+	var event: Dictionary = payload.duplicate(true)
 	event["kind"] = kind
 	event["tick"] = tick_index
 	event["time_min"] = simulation_time_min
@@ -163,20 +163,20 @@ func population_size() -> int:
 	return cells.size()
 
 func maximum_generation() -> int:
-	var result := 0
+	var result: int = 0
 	for cell in cells:
-		result = maxi(result, cell.generation)
+		result = maxi(result, int(cell.generation))
 	return result
 
 func total_cell_volume() -> float:
-	var result := 0.0
+	var result: float = 0.0
 	for cell in cells:
-		result += cell.volume
+		result += float(cell.volume)
 	return result
 
 func checksum() -> float:
-	var result := world.checksum() + float(tick_index) * 37.0 + simulation_time_min * 41.0
+	var result: float = float(world.checksum()) + float(tick_index) * 37.0 + simulation_time_min * 41.0
 	for cell in cells:
-		result += cell.checksum()
+		result += float(cell.checksum())
 	result += float(rng.get_state() % 1000003) * 1e-6
 	return result
