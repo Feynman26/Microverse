@@ -221,14 +221,12 @@ static func _restore_world(world, data: Dictionary) -> void:
 		var field_data: Dictionary = field_data_variant
 		var field = world.get_field(String(field_data["name"]))
 		field.diffusion_coefficient = float(field_data["diffusion_coefficient"])
-		field.values = field_data["values"].duplicate()
-		field._buffer = field.values.duplicate()
+		field.replace_values(field_data["values"])
 	world.protein_fields.clear()
 	for protein_data_variant in data["protein_fields"]:
 		var protein_data: Dictionary = protein_data_variant
 		var protein_field = world.ensure_protein_field(int(protein_data["signature"]), float(protein_data["diffusion_coefficient"]))
-		protein_field.values = protein_data["values"].duplicate()
-		protein_field._buffer = protein_field.values.duplicate()
+		protein_field.replace_values(protein_data["values"])
 	world.assert_nonnegative()
 
 static func _validate_snapshot(snapshot: Dictionary) -> void:
