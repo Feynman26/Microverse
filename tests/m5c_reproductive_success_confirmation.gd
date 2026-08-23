@@ -18,8 +18,10 @@ func _init() -> void:
 	call_deferred("_run")
 
 func _run() -> void:
+	# Independent confirmation panel frozen before observing the model with the
+	# shared ribosome constraint. No seed from earlier M5-C panels is reused.
 	var seeds: Array = []
-	for seed in range(21001, 21065):
+	for seed in range(22001, 22065):
 		seeds.append(seed)
 
 	var stable_c_success: int = 0
@@ -73,12 +75,12 @@ func _run() -> void:
 		var corrected_magnitude: float = maxf(0.0, float(abs(raw_delta) - 1)) / sqrt(float(discordant))
 		signed_mcnemar_z = corrected_magnitude if raw_delta >= 0 else -corrected_magnitude
 
-	print("M5-C REPRO stable C=%d/%d (%.6f) R=%d/%d (%.6f) diff=%.6f" % [stable_c_success, seeds.size(), p_c_stable, stable_r_success, seeds.size(), p_r_stable, stable_difference])
-	print("M5-C REPRO fluctuating C=%d/%d (%.6f) R=%d/%d (%.6f) diff=%.6f interaction=%.6f" % [fluct_c_success, int(fluct_n), p_c_fluct, fluct_r_success, int(fluct_n), p_r_fluct, fluct_difference, interaction])
-	print("M5-C REPRO discordant responsive_only=%d constitutive_only=%d total=%d corrected_z=%.6f" % [responsive_only, constitutive_only, discordant, signed_mcnemar_z])
+	print("M5-C RIBO-REPRO stable C=%d/%d (%.6f) R=%d/%d (%.6f) diff=%.6f" % [stable_c_success, seeds.size(), p_c_stable, stable_r_success, seeds.size(), p_r_stable, stable_difference])
+	print("M5-C RIBO-REPRO fluctuating C=%d/%d (%.6f) R=%d/%d (%.6f) diff=%.6f interaction=%.6f" % [fluct_c_success, int(fluct_n), p_c_fluct, fluct_r_success, int(fluct_n), p_r_fluct, fluct_difference, interaction])
+	print("M5-C RIBO-REPRO discordant responsive_only=%d constitutive_only=%d total=%d corrected_z=%.6f" % [responsive_only, constitutive_only, discordant, signed_mcnemar_z])
 	for offset_variant in offsets:
 		var offset: int = int(offset_variant)
-		print("M5-C REPRO phase offset=%d responsive_only=%d constitutive_only=%d" % [offset, int(phase_responsive_only[offset]), int(phase_constitutive_only[offset])])
+		print("M5-C RIBO-REPRO phase offset=%d responsive_only=%d constitutive_only=%d" % [offset, int(phase_responsive_only[offset]), int(phase_constitutive_only[offset])])
 
 	_assert_true(p_c_stable >= MIN_STABLE_SUCCESS and p_r_stable >= MIN_STABLE_SUCCESS, "both regulatory architectures reproduce in at least 95 percent of stable-high trials")
 	_assert_true(absf(stable_difference) <= MAX_STABLE_DIFFERENCE, "stable-high reproductive-success difference remains within three percentage points")
@@ -88,10 +90,10 @@ func _run() -> void:
 	_assert_true(responsive_only >= WIN_RATIO * maxi(1, constitutive_only), "responsive-only reproductive successes outnumber constitutive-only successes by at least three to one")
 
 	if failures == 0:
-		print("PASS: %d final M5-C reproductive-success confirmation tests" % tests_run)
+		print("PASS: %d final M5-C ribosome-limited reproductive-success confirmation tests" % tests_run)
 		quit(0)
 	else:
-		push_error("FAIL: %d of %d final M5-C reproductive-success confirmation tests failed" % [failures, tests_run])
+		push_error("FAIL: %d of %d final M5-C ribosome-limited reproductive-success confirmation tests failed" % [failures, tests_run])
 		quit(1)
 
 func _assert_true(condition: bool, message: String) -> void:
