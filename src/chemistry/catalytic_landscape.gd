@@ -22,8 +22,6 @@ static func affinity(protein_signature: int, reaction_signature: int) -> float:
 static func is_active(protein_signature: int, reaction_signature: int) -> bool:
 	return hamming_distance(protein_signature, reaction_signature) <= ACTIVE_MAX_DISTANCE
 
-# Retained only for landscape characterization and migration controls. Living
-# M5 cells use proteome_activity(), never promoter code as protein abundance.
 static func gene_activity(gene, reaction) -> float:
 	return float(gene.promoter_strength()) * affinity(int(gene.protein_signature), int(reaction.signature)) * float(reaction.catalytic_ceiling)
 
@@ -33,11 +31,23 @@ static func genome_activity(genome, reaction) -> float:
 		result += gene_activity(gene, reaction)
 	return result
 
+# Compatibility helper for M4 controls that still express one abundance per
+# current locus. Authoritative M5 cells use cohort_activity().
 static func proteome_activity(genome, protein_abundance: Dictionary, reaction) -> float:
 	var result: float = 0.0
 	for gene in genome.genes:
 		var abundance: float = maxf(0.0, float(protein_abundance.get(int(gene.locus_id), 0.0)))
 		result += abundance * affinity(int(gene.protein_signature), int(reaction.signature)) * float(reaction.catalytic_ceiling)
+	return result
+
+static func cohort_activity(protein_cohorts: Dictionary, reaction) -> float:
+	var result: float = 0.0
+	for cohorts_variant in protein_cohorts.values():
+		var cohorts: Dictionary = cohorts_variant
+		for signature_variant in cohorts.keys():
+			var signature: int = int(signature_variant)
+			var abundance: float = maxf(0.0, float(cohorts[signature]))
+			result += abundance * affinity(signature, int(reaction.signature)) * float(reaction.catalytic_ceiling)
 	return result
 
 static func strongest_gene_activity(genome, reaction) -> Dictionary:
