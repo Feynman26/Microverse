@@ -1,6 +1,8 @@
 extends Node2D
 
 const SimulationEngineScript = preload("res://src/simulation/simulation_engine.gd")
+const SimConfigScript = preload("res://src/core/sim_config.gd")
+const DNAReplicationScript = preload("res://src/genetics/dna_replication.gd")
 
 const TILE_PX: float = 8.0
 const WORLD_ORIGIN: Vector2 = Vector2(20.0, 70.0)
@@ -13,9 +15,14 @@ const MAX_TICKS_PER_FRAME: int = 256
 const STATUS_REFRESH_SEC: float = 0.25
 const DRAW_REFRESH_SEC: float = 0.10
 const SPEED_MEASURE_SEC: float = 0.50
+# This is explicitly a workstation safety guard, not a carrying capacity. The
+# UI pauses the instant it is reached so the engine never continues an
+# artificial "stationary phase" in which otherwise-ready divisions are blocked.
+const INTERACTIVE_MAX_CELLS: int = 256
 
 var simulation
 var paused: bool = false
+var compute_limit_reached: bool = false
 var time_multiplier: float = 10.0
 var _sim_minute_budget: float = 0.0
 var _status_refresh_budget: float = 0.0
@@ -27,7 +34,10 @@ var _status_label: Label
 var _help_label: Label
 
 func _ready() -> void:
-	simulation = SimulationEngineScript.new()
+	var config = SimConfigScript.new()
+	config.max_cells = INTERACTIVE_MAX_CELLS
+	config.validate()
+	simulation = SimulationEngineScript.new(config)
 	simulation.seed_ancestor()
 	_create_labels()
 	_update_status()
@@ -50,6 +60,11 @@ func _process(delta: float) -> void:
 			simulation.step(1)
 			_sim_minute_budget -= float(simulation.config.tick_dt_min)
 			ticks_ran += 1
+			if simulation.population_size() >= int(simulation.config.max_cells):
+				compute_limit_reached = true
+				paused = true
+				_sim_minute_budget = 0.0
+				break
 			if Time.get_ticks_usec() >= deadline_usec:
 				break
 
@@ -65,16 +80,30 @@ func _process(delta: float) -> void:
 	if _status_refresh_budget >= STATUS_REFRESH_SEC:
 		_status_refresh_budget = fmod(_status_refresh_budget, STATUS_REFRESH_SEC)
 		_update_status()
-	if _draw_refresh_budget >= DRAW_REFRESH_SEC:
-		_draw_refresh_budget = fmod(_draw_refresh_budget, DRAW_REFRESH_SEC)
+	var draw_refresh: float = _current_draw_refresh_sec()
+	if _draw_refresh_budget >= draw_refresh:
+		_draw_refresh_budget = fmod(_draw_refresh_budget, draw_refresh)
 		queue_redraw()
+
+func _current_draw_refresh_sec() -> float:
+	# At high requested clocks, rendering is deliberately sampled more sparsely.
+	# This changes only observer cadence; every biological tick remains intact.
+	if time_multiplier >= 1000.0:
+		return 0.50
+	if time_multiplier >= 100.0:
+		return 0.25
+	return DRAW_REFRESH_SEC
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not event is InputEventKey or not event.pressed or event.echo:
 		return
 	match event.keycode:
 		KEY_SPACE:
-			paused = not paused
+			# A reached computational guard cannot be resumed without changing the
+			# experiment's configured guard. Restart with a larger guard instead of
+			# silently allowing cap-induced biology.
+			if not compute_limit_reached:
+				paused = not paused
 		KEY_1:
 			time_multiplier = 1.0
 		KEY_2:
@@ -125,7 +154,7 @@ func _update_status() -> void:
 	var oxygen_total: float = simulation.world.get_field("oxygen").total_amount()
 	var nitrogen_total: float = simulation.world.get_field("nitrogen").total_amount()
 	var phosphorus_total: float = simulation.world.get_field("phosphorus").total_amount()
-	var state: String = "PAUSED" if paused else "RUNNING"
+	var state: String = "COMPUTE LIMIT" if compute_limit_reached else ("PAUSED" if paused else "RUNNING")
 	var achieved_multiplier: float = (
 		_actual_ticks_per_sec * float(simulation.config.tick_dt_min) / BASE_SIM_MIN_PER_REAL_SEC
 	)
@@ -136,14 +165,14 @@ func _update_status() -> void:
 		+ "Achieved clock: %.1fx (%.1f ticks/s)\n" % [achieved_multiplier, _actual_ticks_per_sec]
 		+ "Tick: %d\n" % simulation.tick_index
 		+ "Virtual time: %.1f min\n\n" % simulation.simulation_time_min
-		+ "Population: %d / %d\n" % [simulation.population_size(), simulation.config.max_cells]
+		+ "Population: %d / %d COMPUTE CAP\n" % [simulation.population_size(), simulation.config.max_cells]
 		+ "Max generation: %d\n" % simulation.maximum_generation()
 		+ "Genotypes alive: %d\n" % simulation.genotype_count()
 		+ "Mutation events: %d\n" % simulation.mutation_event_count()
 		+ "Total BIO-volume: %.3f\n" % simulation.total_cell_volume()
 		+ "Division ready: %d\n" % int(division["ready"])
 		+ "  size-ready / ATP-blocked: %d / %d\n" % [int(division["volume_ready"]), int(division["volume_ready_atp_blocked"])]
-		+ "  size+ATP / DNA-blocked: %d / %d\n\n" % [int(division["volume_atp_ready"]), int(division["volume_atp_ready_replication_blocked"])]
+		+ "  size+ATP / DNA-blocked: %d\n\n" % int(division["volume_atp_ready_replication_blocked"])
 		+ "Environment\n"
 		+ "  G: %.2f  O2: %.2f\n" % [glucose_total, oxygen_total]
 		+ "  N: %.2f  P: %.2f\n\n" % [nitrogen_total, phosphorus_total]
@@ -156,7 +185,6 @@ func _update_status() -> void:
 func _division_status() -> Dictionary:
 	var ready: int = 0
 	var volume_ready: int = 0
-	var volume_atp_ready: int = 0
 	var volume_ready_atp_blocked: int = 0
 	var volume_atp_ready_replication_blocked: int = 0
 	for cell in simulation.cells:
@@ -164,21 +192,21 @@ func _division_status() -> Dictionary:
 			continue
 		var has_volume: bool = float(cell.volume) >= float(simulation.config.division_volume)
 		var has_atp: bool = float(cell.pool("ATP")) >= float(simulation.config.division_atp_cost)
-		var is_ready: bool = cell.ready_to_divide(simulation.config)
+		var has_replication: bool = (
+			not bool(simulation.config.evolvable_replication_enabled)
+			or DNAReplicationScript.replication_complete(cell)
+		)
 		if has_volume:
 			volume_ready += 1
 			if not has_atp:
 				volume_ready_atp_blocked += 1
+			elif not has_replication:
+				volume_atp_ready_replication_blocked += 1
 			else:
-				volume_atp_ready += 1
-				if not is_ready:
-					volume_atp_ready_replication_blocked += 1
-		if is_ready:
-			ready += 1
+				ready += 1
 	return {
 		"ready": ready,
 		"volume_ready": volume_ready,
-		"volume_atp_ready": volume_atp_ready,
 		"volume_ready_atp_blocked": volume_ready_atp_blocked,
 		"volume_atp_ready_replication_blocked": volume_atp_ready_replication_blocked
 	}
