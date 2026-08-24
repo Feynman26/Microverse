@@ -18,6 +18,7 @@ func _run() -> void:
 	_test_extinction_is_terminal_and_explained()
 	_test_redox_energy_tradeoff_is_observable()
 	_test_population_threshold_stop_is_explicit()
+	_test_computational_population_limit_is_explicit()
 	_test_batch_order_does_not_change_individual_runs()
 	_test_run_metadata_is_self_identifying()
 
@@ -125,6 +126,24 @@ func _test_population_threshold_stop_is_explicit() -> void:
 	_assert_true(String(result["termination_reason"]) == "population_threshold", "runner records a population-threshold stop explicitly")
 	_assert_true(int(result["realized_ticks"]) == 1, "already-satisfied living population threshold stops after the first authoritative tick")
 
+func _test_computational_population_limit_is_explicit() -> void:
+	var spec: Dictionary = ExperimentRunnerScript.create_spec(
+		88416,
+		20,
+		20,
+		EnvironmentScheduleScript.closed()
+	)
+	spec["world_width"] = 8
+	spec["world_height"] = 8
+	spec["max_cells"] = 2
+	spec["mutation_enabled"] = false
+	spec["initial_positions"] = [Vector2(2.0, 2.0), Vector2(5.0, 5.0)]
+	var result: Dictionary = ExperimentRunnerScript.run(spec)
+	_assert_true(String(result["termination_reason"]) == "computational_population_limit", "runner never presents the computational population guard as biological stationarity")
+	_assert_true(bool(result["computational_limit_reached"]), "run metadata explicitly marks computational-cap contact")
+	_assert_true(int(result["computational_population_limit"]) == 2, "run records the exact computational population guard")
+	_assert_true(int(result["realized_ticks"]) == 1, "cap contact terminates before later cap-suppressed physiology can accumulate")
+
 func _test_batch_order_does_not_change_individual_runs() -> void:
 	var spec: Dictionary = _short_constant_spec(1, 400, 40)
 	var forward: Dictionary = ExperimentRunnerScript.run_batch(spec, [801, 802])
@@ -140,6 +159,7 @@ func _test_run_metadata_is_self_identifying() -> void:
 	var result: Dictionary = ExperimentRunnerScript.run(spec)
 	_assert_true(int(result["schema_version"]) == ExperimentRunnerScript.SCHEMA_VERSION, "run records experiment schema version")
 	_assert_true(String(result["model_version"]) == ExperimentRunnerScript.MODEL_VERSION, "run records model version")
+	_assert_true(String(result["model_version"]) == "microverse-m10", "M10 experiments cannot be mislabeled as the historical M8 model")
 	_assert_true(int(result["seed"]) == 99005, "run records exact RNG seed")
 	_assert_true(result.has("death_causes") and result.has("final_resources") and result.has("final_cell_diagnostics"), "run records population-loss, resource, and cellular-stress diagnostics")
 
