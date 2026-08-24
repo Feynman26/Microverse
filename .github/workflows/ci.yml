@@ -1,17 +1,18 @@
 name: CI
 
 on:
+  # Feature branches are validated by their pull-request merge candidate. The
+  # previous build/** push trigger duplicated the complete suite for every
+  # commit. Main is revalidated after merge.
   push:
-    branches: [main, "build/**"]
+    branches: [main]
   pull_request:
     branches: [main]
 
-# A newer commit on the same branch makes the older full biological regression
-# suite irrelevant. Cancel only superseded executions for the same workflow/ref;
-# main and independent branches remain isolated. This changes CI scheduling only,
-# never which tests the current head must pass.
+# A newer commit on the same PR makes its older full biological regression
+# irrelevant. Main and independent PRs remain isolated.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
