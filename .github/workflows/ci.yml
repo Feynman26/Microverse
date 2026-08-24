@@ -48,6 +48,9 @@ jobs:
       - name: Validate M10 DNA material conservation
         run: godot --headless --path . --script tests/m10_dna_material_tests.gd
 
+      - name: Validate M10 molecular history after DNA deletion
+        run: godot --headless --path . --script tests/m10_orphan_protein_function_tests.gd
+
       - name: Validate M10 cis-regulatory architecture
         run: godot --headless --path . --script tests/m10_cis_architecture_tests.gd
 
