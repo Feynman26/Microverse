@@ -45,34 +45,49 @@ static func genome_activity(genome, reaction) -> float:
 		result += gene_activity(gene, reaction)
 	return result
 
-# Production M5 catalysis reads the proteins that physically exist, including
-# old-sequence cohorts inherited across a coding mutation. DNA is used for new
-# expression upstream, not as a shortcut for current catalytic abundance.
-static func proteome_activity(genome, expression_state: Dictionary, reaction, config) -> float:
+# Production catalysis reads every protein molecule that physically exists in
+# expression_state, not only loci still present in DNA. This matters after an
+# M10 gene deletion: inherited proteins must keep catalysing until ordinary
+# protein decay removes them. Newly duplicated DNA starts with an empty cohort,
+# so it contributes nothing until expression actually creates protein.
+#
+# Loci/signatures are sorted only to canonicalize floating-point accumulation;
+# genome rearrangement must not change chemistry merely by changing array order.
+static func proteome_activity(_genome, expression_state: Dictionary, reaction, config) -> float:
 	var result: float = 0.0
-	for gene in genome.genes:
-		var cohorts: Dictionary = ExpressionSystemScript.protein_cohorts_for_locus(expression_state, int(gene.locus_id))
-		for signature_variant in cohorts.keys():
+	var loci: Array = expression_state.keys()
+	loci.sort()
+	for locus_variant in loci:
+		var locus_id: int = int(locus_variant)
+		var cohorts: Dictionary = expression_state[locus_id]["protein"]
+		var signatures: Array = cohorts.keys()
+		signatures.sort()
+		for signature_variant in signatures:
 			var protein_signature: int = int(signature_variant)
 			var abundance: float = maxf(0.0, float(cohorts[signature_variant])) / float(config.expression_reference_protein_count)
 			result += abundance * affinity(protein_signature, int(reaction.signature)) * float(reaction.catalytic_ceiling)
 	return result
 
-static func strongest_protein_contribution(genome, expression_state: Dictionary, reaction, config) -> Dictionary:
+static func strongest_protein_contribution(_genome, expression_state: Dictionary, reaction, config) -> Dictionary:
 	var best_locus: int = -1
 	var best_signature: int = -1
 	var best_activity: float = 0.0
 	var best_distance: int = SIGNATURE_BITS + 1
-	for gene in genome.genes:
-		var cohorts: Dictionary = ExpressionSystemScript.protein_cohorts_for_locus(expression_state, int(gene.locus_id))
-		for signature_variant in cohorts.keys():
+	var loci: Array = expression_state.keys()
+	loci.sort()
+	for locus_variant in loci:
+		var locus_id: int = int(locus_variant)
+		var cohorts: Dictionary = expression_state[locus_id]["protein"]
+		var signatures: Array = cohorts.keys()
+		signatures.sort()
+		for signature_variant in signatures:
 			var protein_signature: int = int(signature_variant)
 			var distance: int = hamming_distance(protein_signature, int(reaction.signature))
 			var abundance: float = maxf(0.0, float(cohorts[signature_variant])) / float(config.expression_reference_protein_count)
 			var activity: float = abundance * affinity(protein_signature, int(reaction.signature)) * float(reaction.catalytic_ceiling)
 			if activity > best_activity:
 				best_activity = activity
-				best_locus = int(gene.locus_id)
+				best_locus = locus_id
 				best_signature = protein_signature
 				best_distance = distance
 	return {"locus_id": best_locus, "protein_signature": best_signature, "activity": best_activity, "distance": best_distance}
