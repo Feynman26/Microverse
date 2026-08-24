@@ -1,5 +1,9 @@
 extends SceneTree
 
+const SimConfigScript = preload("res://src/core/sim_config.gd")
+const CellStateScript = preload("res://src/biology/cell_state.gd")
+const CellMechanicsScript = preload("res://src/physics/cell_mechanics.gd")
+const SpatialHashScript = preload("res://src/physics/spatial_hash.gd")
 const WorldStateScript = preload("res://src/world/world_state.gd")
 const ChemicalFieldScript = preload("res://src/world/chemical_field.gd")
 
@@ -12,6 +16,7 @@ func _init() -> void:
 func _run() -> void:
 	_test_exact_zero_fast_path()
 	_test_parallel_diffusion_matches_serial_exactly()
+	_test_indexed_overlap_matches_all_pairs_exactly()
 	if failures == 0:
 		print("PASS: %d M10 performance-equivalence tests" % tests_run)
 		quit(0)
@@ -43,6 +48,32 @@ func _test_parallel_diffusion_matches_serial_exactly() -> void:
 			serial.get_field(field_name).values == parallel.get_field(field_name).values,
 			"parallel diffusion preserves every %s lattice value" % field_name
 		)
+
+func _test_indexed_overlap_matches_all_pairs_exactly() -> void:
+	var config = SimConfigScript.new()
+	config.mechanical_use_spatial_index = true
+	config.mechanical_neighbor_bucket_size_grid = 2.0
+	var cells: Array = []
+	var next_id: int = 1
+	# Mixed sparse/dense geometry exercises duplicate bucket membership and
+	# overlapping disks without relying on mechanics to alter the fixture.
+	for y in range(10):
+		for x in range(10):
+			var jitter_x: float = 0.16 if (x + y) % 3 == 0 else 0.0
+			var jitter_y: float = -0.11 if (x * 2 + y) % 4 == 0 else 0.0
+			var cell = CellStateScript.new(
+				next_id, -1, 0, 0,
+				Vector2(2.0 + float(x) * 0.78 + jitter_x, 2.0 + float(y) * 0.78 + jitter_y),
+				1.0 + 0.15 * float((x + 2 * y) % 3)
+			)
+			cells.append(cell)
+			next_id += 1
+	var pairs: Array = SpatialHashScript.candidate_pairs(cells, config, config.mechanical_neighbor_bucket_size_grid)
+	var indexed_overlap: float = CellMechanicsScript._max_overlap_from_pairs(pairs, config)
+	var all_pairs_overlap: float = CellMechanicsScript.max_overlap(cells, config)
+	_assert_close(indexed_overlap, all_pairs_overlap, 0.0, "spatial broad-phase maximum overlap is bit-exact with O(N^2) diagnostic")
+	var all_pair_count: int = cells.size() * (cells.size() - 1) / 2
+	_assert_true(pairs.size() < all_pair_count, "spatial overlap diagnostic examines fewer pairs than all-pairs fixture")
 
 func _fixture_world():
 	var world = WorldStateScript.new(16, 16, 1.0)
