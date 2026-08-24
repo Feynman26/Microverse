@@ -6,6 +6,14 @@ on:
   pull_request:
     branches: [main]
 
+# A newer commit on the same branch makes the older full biological regression
+# suite irrelevant. Cancel only superseded executions for the same workflow/ref;
+# main and independent branches remain isolated. This changes CI scheduling only,
+# never which tests the current head must pass.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
