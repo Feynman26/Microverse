@@ -5,7 +5,10 @@ var tick_dt_min: float = 0.10
 var world_width: int = 64
 var world_height: int = 64
 var grid_cell_size_um: float = 1.0
-var max_cells: int = 64
+# Computational safety guard only; it is not an ecological carrying capacity.
+# ExperimentRunner/UI stop explicitly when the guard is reached so suppressed
+# divisions are never interpreted as stationary-phase biology.
+var max_cells: int = 256
 var seed: int = 824718
 
 var initial_glucose: float = 4.0
