@@ -129,6 +129,11 @@ func _test_local_reproduction_supports_clonal_sectors() -> void:
 	config.mechanical_relaxation_iterations = 48
 	config.mechanical_overlap_tolerance = 1e-5
 	config.mutation_enabled = false
+	# This is a controlled M6 geometry/inheritance fixture that directly invokes
+	# create_daughters() on hand-constructed division-ready cells. Disable the
+	# later M10 DNA-replication gate here so the historical test continues to
+	# isolate local birth mechanics rather than silently emulating a cell cycle.
+	config.evolvable_replication_enabled = false
 	var world = WorldStateScript.new(config.world_width, config.world_height, config.grid_cell_size_um)
 	var rng = DeterministicRngScript.new(481151)
 	var left_origin := Vector2(8.0, 12.0)

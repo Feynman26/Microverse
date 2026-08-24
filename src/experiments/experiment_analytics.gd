@@ -1,9 +1,9 @@
 extends RefCounted
 class_name ExperimentAnalytics
 
-# M8 analytics are deliberately post hoc. They accept immutable run dictionaries
-# and return hypotheses/summary statistics; they never receive SimulationEngine
-# and therefore cannot alter physiology, RNG state, environment, or survival.
+# Analytics are deliberately post hoc. They accept immutable run dictionaries
+# and return hypotheses/summary statistics; they never alter physiology, RNG,
+# environment, heredity or survival.
 
 static func summarize_batch(batch_or_runs) -> Dictionary:
 	var runs: Array = batch_or_runs.get("runs", []) if batch_or_runs is Dictionary else batch_or_runs
@@ -59,7 +59,8 @@ static func detect_candidates(run: Dictionary) -> Dictionary:
 	var bottleneck: bool = max_population >= 4 and min_population <= maxi(1, int(floor(float(max_population) * 0.25)))
 	var extinct: bool = final_population == 0
 	var rescue: bool = _ecological_rescue(populations)
-	var mutation_shift: bool = _mutation_rate_shift(trajectory)
+	var mutation_shift: Dictionary = _mutation_rate_shift(trajectory)
+	var genome_shift: Dictionary = _genome_size_shift(trajectory)
 	var resource_novelty: Dictionary = _closed_resource_novelty(run)
 
 	return {
@@ -92,15 +93,8 @@ static func detect_candidates(run: Dictionary) -> Dictionary:
 			"evidence_available": false,
 			"reason": "requires sampled secretion/transport coupling history"
 		},
-		"genome_expansion_or_reduction": {
-			"candidate": false,
-			"evidence_available": false,
-			"reason": "gene duplication/deletion is not yet an active mutation operator"
-		},
-		"mutation_rate_shift": {
-			"candidate": mutation_shift,
-			"evidence_available": trajectory.size() >= 4
-		},
+		"genome_expansion_or_reduction": genome_shift,
+		"mutation_rate_shift": mutation_shift,
 		"recurring_population_cycles": {
 			"candidate": turning_points >= 3,
 			"turning_points": turning_points
@@ -179,9 +173,31 @@ static func _ecological_rescue(populations: Array) -> bool:
 	var final_population: int = int(populations[-1])
 	return minimum < initial and final_population > minimum and final_population >= initial
 
-static func _mutation_rate_shift(trajectory: Array) -> bool:
+# Prefer M10's mechanistic expected per-copy error distribution when available.
+# For archived pre-M10 run dictionaries, fall back to the older event-count
+# heuristic rather than rewriting historical evidence.
+static func _mutation_rate_shift(trajectory: Array) -> Dictionary:
+	if trajectory.size() < 2:
+		return {"candidate": false, "evidence_available": false, "reason": "insufficient samples"}
+	var first_dynamics: Dictionary = trajectory[0].get("mutation_dynamics", {})
+	var last_dynamics: Dictionary = trajectory[-1].get("mutation_dynamics", {})
+	if not first_dynamics.is_empty() and not last_dynamics.is_empty():
+		var first_dist: Dictionary = first_dynamics.get("point_error_rate_per_gene", {})
+		var last_dist: Dictionary = last_dynamics.get("point_error_rate_per_gene", {})
+		if int(first_dist.get("count", 0)) > 0 and int(last_dist.get("count", 0)) > 0:
+			var initial_mean: float = float(first_dist.get("mean", 0.0))
+			var final_mean: float = float(last_dist.get("mean", 0.0))
+			var delta: float = final_mean - initial_mean
+			return {
+				"candidate": absf(delta) > 1e-12,
+				"evidence_available": true,
+				"initial_mean_point_error_rate_per_gene": initial_mean,
+				"final_mean_point_error_rate_per_gene": final_mean,
+				"change": delta,
+				"source": "replication-derived expected copy error"
+			}
 	if trajectory.size() < 4:
-		return false
+		return {"candidate": false, "evidence_available": false, "reason": "pre-M10 trajectory has insufficient samples"}
 	var midpoint: int = trajectory.size() / 2
 	var first_start: int = int(trajectory[0].get("mutation_events", 0))
 	var first_end: int = int(trajectory[midpoint - 1].get("mutation_events", 0))
@@ -189,7 +205,43 @@ static func _mutation_rate_shift(trajectory: Array) -> bool:
 	var second_end: int = int(trajectory[-1].get("mutation_events", 0))
 	var first_delta: int = maxi(0, first_end - first_start)
 	var second_delta: int = maxi(0, second_end - second_start)
-	return second_delta >= maxi(2, first_delta * 2)
+	return {
+		"candidate": second_delta >= maxi(2, first_delta * 2),
+		"evidence_available": true,
+		"source": "legacy realized-event heuristic"
+	}
+
+static func _genome_size_shift(trajectory: Array) -> Dictionary:
+	if trajectory.size() < 2:
+		return {"candidate": false, "evidence_available": false, "reason": "insufficient samples"}
+	var first_dynamics: Dictionary = trajectory[0].get("mutation_dynamics", {})
+	var last_dynamics: Dictionary = trajectory[-1].get("mutation_dynamics", {})
+	if first_dynamics.is_empty() or last_dynamics.is_empty():
+		return {
+			"candidate": false,
+			"evidence_available": false,
+			"reason": "trajectory predates sampled M10 genome-size analytics"
+		}
+	var first_genes: Dictionary = first_dynamics.get("gene_count", {})
+	var last_genes: Dictionary = last_dynamics.get("gene_count", {})
+	var first_units: Dictionary = first_dynamics.get("replication_units", {})
+	var last_units: Dictionary = last_dynamics.get("replication_units", {})
+	if int(first_genes.get("count", 0)) <= 0 or int(last_genes.get("count", 0)) <= 0:
+		return {"candidate": false, "evidence_available": false, "reason": "no living genomes in comparison samples"}
+	var initial_mean_genes: float = float(first_genes.get("mean", 0.0))
+	var final_mean_genes: float = float(last_genes.get("mean", 0.0))
+	var initial_units: float = float(first_units.get("mean", 0.0))
+	var final_units: float = float(last_units.get("mean", 0.0))
+	return {
+		"candidate": absf(final_units - initial_units) > 1e-12,
+		"evidence_available": true,
+		"initial_mean_gene_count": initial_mean_genes,
+		"final_mean_gene_count": final_mean_genes,
+		"gene_count_change": final_mean_genes - initial_mean_genes,
+		"initial_mean_replication_units": initial_units,
+		"final_mean_replication_units": final_units,
+		"replication_unit_change": final_units - initial_units
+	}
 
 static func _closed_resource_novelty(run: Dictionary) -> Dictionary:
 	var environment: Dictionary = run.get("environment", {})

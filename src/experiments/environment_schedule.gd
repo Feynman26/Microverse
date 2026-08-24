@@ -246,6 +246,8 @@ static func _validate_fields(fields: Dictionary) -> void:
 
 static func _fill_field(field, value: float) -> void:
 	assert(value >= 0.0)
-	for y in range(field.height):
-		for x in range(field.width):
-			field.set_value(x, y, value)
+	# Exact whole-field replacement. ChemicalField.fill_uniform updates both the
+	# authoritative lattice and its exact zero/minimum caches in one packed-array
+	# operation; iterating 4096 set_value() calls produced the identical state at
+	# far higher CPU cost in constant/square-wave/pulse experiments.
+	field.fill_uniform(value)

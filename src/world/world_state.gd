@@ -15,6 +15,11 @@ var field_order: Array[String] = []
 # deterministic regardless of the order in which secretory lineages appear.
 var protein_fields: Dictionary = {}
 
+# Temporary read-only group-task inputs. Each worker mutates exactly one distinct
+# ChemicalField, so there is no shared chemical state between worker elements.
+var _diffusion_batch: Array = []
+var _diffusion_dt: float = 0.0
+
 func _init(p_width: int = 1, p_height: int = 1, p_cell_size: float = 1.0) -> void:
 	width = p_width
 	height = p_height
@@ -78,11 +83,40 @@ func total_extracellular_protein() -> float:
 		result += float(protein_fields[int(signature_variant)].total_amount())
 	return result
 
-func diffuse(dt: float) -> void:
+func diffuse(dt: float, use_parallel: bool = true) -> void:
+	assert(dt >= 0.0)
+	var active_fields: Array = []
 	for name in field_order:
-		fields[name].step_diffusion(dt)
+		var field = fields[name]
+		if dt > 0.0 and field.diffusion_coefficient > 0.0 and not field.is_all_zero():
+			active_fields.append(field)
 	for signature_variant in protein_signatures():
-		protein_fields[int(signature_variant)].step_diffusion(dt)
+		var protein_field = protein_fields[int(signature_variant)]
+		if dt > 0.0 and protein_field.diffusion_coefficient > 0.0 and not protein_field.is_all_zero():
+			active_fields.append(protein_field)
+
+	if active_fields.is_empty():
+		return
+	if not use_parallel or active_fields.size() < 2:
+		for field in active_fields:
+			field.step_diffusion(dt)
+		return
+
+	_diffusion_batch = active_fields
+	_diffusion_dt = dt
+	var group_id: int = WorkerThreadPool.add_group_task(
+		_diffuse_batch_item,
+		_diffusion_batch.size(),
+		-1,
+		false,
+		"Microverse independent field diffusion"
+	)
+	WorkerThreadPool.wait_for_group_task_completion(group_id)
+	_diffusion_batch = []
+	_diffusion_dt = 0.0
+
+func _diffuse_batch_item(index: int) -> void:
+	_diffusion_batch[index].step_diffusion(_diffusion_dt)
 
 func clamp_position(position: Vector2) -> Vector2:
 	return Vector2(

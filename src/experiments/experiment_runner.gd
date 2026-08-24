@@ -4,9 +4,11 @@ class_name ExperimentRunner
 const SimConfigScript = preload("res://src/core/sim_config.gd")
 const SimulationEngineScript = preload("res://src/simulation/simulation_engine.gd")
 const EnvironmentScheduleScript = preload("res://src/experiments/environment_schedule.gd")
+const MutationDynamicsAnalyticsScript = preload("res://src/experiments/mutation_dynamics_analytics.gd")
 
 const SCHEMA_VERSION: int = 2
-const MODEL_VERSION: String = "microverse-m8b"
+const MODEL_VERSION: String = "microverse-m10"
+const DEFAULT_MAX_CELLS: int = 256
 
 static func create_spec(
 	seed: int,
@@ -27,7 +29,10 @@ static func create_spec(
 		"stop_population_at_least": 0,
 		"world_width": 64,
 		"world_height": 64,
-		"max_cells": 64,
+		# This is a computational guard, never an ecological carrying capacity.
+		# A run terminates explicitly when it reaches the guard so suppressed
+		# divisions cannot be misread as stationary-phase biology.
+		"max_cells": DEFAULT_MAX_CELLS,
 		"mutation_enabled": true,
 		"initial_positions": []
 	}
@@ -62,11 +67,13 @@ static func run(spec: Dictionary) -> Dictionary:
 			stop_population_at_least > 0
 			and sim.population_size() >= stop_population_at_least
 		)
+		var computational_limit_reached: bool = sim.population_size() >= int(config.max_cells)
 		var should_sample: bool = (
 			realized_ticks % sample_every == 0
 			or realized_ticks == horizon_ticks
 			or extinct
 			or population_threshold_reached
+			or computational_limit_reached
 		)
 		if should_sample:
 			trajectory.append(_sample(sim))
@@ -75,6 +82,9 @@ static func run(spec: Dictionary) -> Dictionary:
 			break
 		if population_threshold_reached:
 			termination_reason = "population_threshold"
+			break
+		if computational_limit_reached:
+			termination_reason = "computational_population_limit"
 			break
 
 	return {
@@ -87,6 +97,8 @@ static func run(spec: Dictionary) -> Dictionary:
 		"horizon_ticks": horizon_ticks,
 		"realized_ticks": realized_ticks,
 		"termination_reason": termination_reason,
+		"computational_population_limit": int(config.max_cells),
+		"computational_limit_reached": termination_reason == "computational_population_limit",
 		"trajectory": trajectory,
 		"max_population": max_population,
 		"final_population": sim.population_size(),
@@ -96,9 +108,11 @@ static func run(spec: Dictionary) -> Dictionary:
 		"final_generation_distribution": _generation_distribution(sim),
 		"division_events": _event_count(sim, "division"),
 		"mutation_events": sim.mutation_event_count(),
+		"mutation_event_summary": MutationDynamicsAnalyticsScript.summarize_event_log(sim.event_log),
 		"death_causes": _death_causes(sim),
 		"final_resources": _field_totals(sim),
 		"final_cell_diagnostics": _cell_diagnostics(sim),
+		"final_mutation_dynamics": MutationDynamicsAnalyticsScript.sample_population(sim),
 		"final_checksum": sim.checksum()
 	}
 
@@ -120,10 +134,9 @@ static func run_batch(spec: Dictionary, seeds: Array) -> Dictionary:
 		"by_seed": by_seed
 	}
 
-# Until M9 introduces a durable snapshot format, paired forks use deterministic
-# prefix replay: every arm has the same seed, initial state, prefix schedule and
-# interventions through fork_tick. The returned prefix checksums prove that both
-# arms reach an identical authoritative state before the environmental fork.
+# Paired forks use deterministic prefix replay. Every arm has the same seed,
+# initial state, prefix schedule and interventions through fork_tick; prefix
+# checksums prove identical authoritative state before environmental divergence.
 static func run_paired_fork(
 	base_spec: Dictionary,
 	fork_tick: int,
@@ -174,9 +187,9 @@ static func _validate_spec(spec: Dictionary) -> void:
 	assert(int(spec.get("stop_population_at_least", 0)) >= 0)
 	assert(int(spec.get("world_width", 64)) > 2)
 	assert(int(spec.get("world_height", 64)) > 2)
-	assert(int(spec.get("max_cells", 64)) >= 1)
+	assert(int(spec.get("max_cells", DEFAULT_MAX_CELLS)) >= 1)
 	if int(spec.get("stop_population_at_least", 0)) > 0:
-		assert(int(spec.get("stop_population_at_least", 0)) <= int(spec.get("max_cells", 64)))
+		assert(int(spec.get("stop_population_at_least", 0)) <= int(spec.get("max_cells", DEFAULT_MAX_CELLS)))
 	for intervention_variant in spec.get("interventions", []):
 		var intervention: Dictionary = intervention_variant
 		assert(String(intervention.get("kind", "")) == "serial_transfer")
@@ -188,7 +201,7 @@ static func _create_config(spec: Dictionary):
 	config.seed = int(spec["seed"])
 	config.world_width = int(spec.get("world_width", config.world_width))
 	config.world_height = int(spec.get("world_height", config.world_height))
-	config.max_cells = int(spec.get("max_cells", config.max_cells))
+	config.max_cells = int(spec.get("max_cells", DEFAULT_MAX_CELLS))
 	config.mutation_enabled = bool(spec.get("mutation_enabled", config.mutation_enabled))
 	var initial: Dictionary = spec.get("initial_resources", {})
 	config.initial_glucose = float(initial.get("glucose", config.initial_glucose))
@@ -222,6 +235,7 @@ static func _sample(sim) -> Dictionary:
 		"death_causes": _death_causes(sim),
 		"resources": _field_totals(sim),
 		"cell_diagnostics": _cell_diagnostics(sim),
+		"mutation_dynamics": MutationDynamicsAnalyticsScript.sample_population(sim),
 		"checksum": sim.checksum()
 	}
 

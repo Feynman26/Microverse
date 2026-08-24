@@ -100,9 +100,16 @@ static func relax(cells: Array, world, config, use_spatial_index: bool = false) 
 		if iteration_max_overlap <= float(config.mechanical_overlap_tolerance):
 			break
 
+	# The old diagnostic called max_overlap(), which is an all-pairs O(N^2)
+	# sweep even when production mechanics already use the exact spatial broad
+	# phase. Rebuild the final candidate set at the final positions and evaluate
+	# only those pairs. Because every disk is inserted into every bucket touched
+	# by its AABB, every physically overlapping pair is guaranteed to be present.
+	var final_pairs: Array = _candidate_pairs(ordered, config, use_spatial_index)
+	last_candidate_pairs = final_pairs.size()
 	return {
 		"iterations": iterations_used,
-		"max_overlap": max_overlap(ordered, config),
+		"max_overlap": _max_overlap_from_pairs(final_pairs, config),
 		"contacts": last_contacts,
 		"candidate_pairs": last_candidate_pairs
 	}
@@ -119,6 +126,15 @@ static func _candidate_pairs(ordered: Array, config, use_spatial_index: bool) ->
 		for j in range(i + 1, ordered.size()):
 			result.append([ordered[i], ordered[j]])
 	return result
+
+static func _max_overlap_from_pairs(pairs: Array, config) -> float:
+	var maximum: float = 0.0
+	for pair in pairs:
+		var first = pair[0]
+		var second = pair[1]
+		var target: float = radius_for_cell(first, config) + radius_for_cell(second, config)
+		maximum = maxf(maximum, target - first.position.distance_to(second.position))
+	return maxf(0.0, maximum)
 
 static func max_overlap(cells: Array, config) -> float:
 	var maximum: float = 0.0

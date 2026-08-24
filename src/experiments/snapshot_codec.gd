@@ -7,8 +7,8 @@ const CellStateScript = preload("res://src/biology/cell_state.gd")
 const GeneScript = preload("res://src/genetics/gene.gd")
 const GenomeScript = preload("res://src/genetics/genome.gd")
 
-const SNAPSHOT_SCHEMA_VERSION: int = 1
-const MODEL_IDENTIFIER: String = "microverse-m9"
+const SNAPSHOT_SCHEMA_VERSION: int = 2
+const MODEL_IDENTIFIER: String = "microverse-m10"
 
 const CONFIG_FIELDS: Array[String] = [
 	"tick_dt_min", "world_width", "world_height", "grid_cell_size_um", "max_cells", "seed",
@@ -34,6 +34,12 @@ const CONFIG_FIELDS: Array[String] = [
 	"allosteric_max_factor", "maintenance_atp_rate_per_volume", "spontaneous_ros_decay_rate",
 	"ros_damage_rate", "basal_repair_rate", "repair_atp_cost", "lethal_damage", "lethal_energy_debt",
 	"ancestor_volume", "division_volume", "division_atp_cost", "partition_jitter", "daughter_offset_grid",
+	"evolvable_replication_enabled", "genome_replication_initiation_volume",
+	"genome_replication_gene_copy_rate_per_min", "genome_replication_nuc_cost_per_gene",
+	"genome_replication_atp_cost_per_gene", "dna_repair_max_distance", "dna_repair_distance_decay",
+	"dna_repair_fidelity_gain", "dna_repair_atp_cost_per_gene_activity",
+	"baseline_point_error_rate_per_gene", "minimum_point_error_rate_per_gene",
+	"baseline_structural_error_rate_per_genome", "minimum_structural_error_rate_per_genome",
 	"ancestor_radius_grid", "mechanical_relaxation_iterations", "mechanical_relaxation_fraction",
 	"mechanical_overlap_tolerance", "mechanical_use_spatial_index", "mechanical_neighbor_bucket_size_grid",
 	"mutation_enabled", "promoter_mutation_rate_per_gene", "signature_mutation_rate_per_gene",
@@ -87,9 +93,15 @@ static func capture_cell(cell) -> Dictionary:
 		"expression_state": cell.expression_state.duplicate(true),
 		"last_fluxes": cell.last_fluxes.duplicate(true),
 		"last_expression_summary": cell.last_expression_summary.duplicate(true),
+		"last_replication_summary": cell.last_replication_summary.duplicate(true),
 		"volume": float(cell.volume),
 		"damage": float(cell.damage),
-		"energy_debt": float(cell.energy_debt)
+		"energy_debt": float(cell.energy_debt),
+		"replication_progress": float(cell.replication_progress),
+		"replication_gene_equivalents_copied": float(cell.replication_gene_equivalents_copied),
+		"replication_atp_spent": float(cell.replication_atp_spent),
+		"replication_nuc_spent": float(cell.replication_nuc_spent),
+		"replication_repair_activity_integral": float(cell.replication_repair_activity_integral)
 	}
 
 static func capture_genome(genome) -> Dictionary:
@@ -101,9 +113,16 @@ static func capture_genome(genome) -> Dictionary:
 			"promoter_code": int(gene.promoter_code),
 			"protein_signature": int(gene.protein_signature),
 			"neutral_marker": int(gene.neutral_marker),
-			"regulatory_signature": int(gene.regulatory_signature)
+			"regulatory_signature": int(gene.regulatory_signature),
+			"promoter_copy_number": int(gene.promoter_copy_number),
+			"regulatory_copy_number": int(gene.regulatory_copy_number)
 		})
-	return {"genes": genes, "canonical_key": genome.canonical_key(), "fingerprint": int(genome.fingerprint())}
+	return {
+		"genes": genes,
+		"canonical_key": genome.canonical_key(),
+		"fingerprint": int(genome.fingerprint()),
+		"replication_units": float(genome.replication_unit_count())
+	}
 
 static func restore(snapshot: Dictionary):
 	_validate_snapshot(snapshot)
@@ -145,9 +164,15 @@ static func restore_cell(data: Dictionary):
 	cell.expression_state = data["expression_state"].duplicate(true)
 	cell.last_fluxes = data["last_fluxes"].duplicate(true)
 	cell.last_expression_summary = data["last_expression_summary"].duplicate(true)
+	cell.last_replication_summary = data["last_replication_summary"].duplicate(true)
 	cell.volume = float(data["volume"])
 	cell.damage = float(data["damage"])
 	cell.energy_debt = float(data["energy_debt"])
+	cell.replication_progress = float(data["replication_progress"])
+	cell.replication_gene_equivalents_copied = float(data["replication_gene_equivalents_copied"])
+	cell.replication_atp_spent = float(data["replication_atp_spent"])
+	cell.replication_nuc_spent = float(data["replication_nuc_spent"])
+	cell.replication_repair_activity_integral = float(data["replication_repair_activity_integral"])
 	return cell
 
 static func restore_genome(data: Dictionary):
@@ -156,10 +181,13 @@ static func restore_genome(data: Dictionary):
 		var gene_data: Dictionary = gene_data_variant
 		genes.append(GeneScript.new(
 			int(gene_data["locus_id"]), int(gene_data["promoter_code"]), int(gene_data["protein_signature"]),
-			int(gene_data["neutral_marker"]), int(gene_data["regulatory_signature"])
+			int(gene_data["neutral_marker"]), int(gene_data["regulatory_signature"]),
+			int(gene_data.get("promoter_copy_number", 1)), int(gene_data.get("regulatory_copy_number", 1))
 		))
 	var genome = GenomeScript.new(genes)
 	assert(genome.canonical_key() == String(data["canonical_key"]))
+	if data.has("replication_units"):
+		assert(absf(genome.replication_unit_count() - float(data["replication_units"])) <= 1e-12)
 	return genome
 
 static func fork(sim, experiment_context: Dictionary = {}) -> Array:
@@ -221,14 +249,12 @@ static func _restore_world(world, data: Dictionary) -> void:
 		var field_data: Dictionary = field_data_variant
 		var field = world.get_field(String(field_data["name"]))
 		field.diffusion_coefficient = float(field_data["diffusion_coefficient"])
-		field.values = field_data["values"].duplicate()
-		field._buffer = field.values.duplicate()
+		field.replace_values(field_data["values"])
 	world.protein_fields.clear()
 	for protein_data_variant in data["protein_fields"]:
 		var protein_data: Dictionary = protein_data_variant
 		var protein_field = world.ensure_protein_field(int(protein_data["signature"]), float(protein_data["diffusion_coefficient"]))
-		protein_field.values = protein_data["values"].duplicate()
-		protein_field._buffer = protein_field.values.duplicate()
+		protein_field.replace_values(protein_data["values"])
 	world.assert_nonnegative()
 
 static func _validate_snapshot(snapshot: Dictionary) -> void:

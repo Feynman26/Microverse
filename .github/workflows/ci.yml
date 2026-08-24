@@ -1,10 +1,19 @@
 name: CI
 
 on:
+  # Feature branches are validated by their pull-request merge candidate. The
+  # previous build/** push trigger duplicated the complete suite for every
+  # commit. Main is revalidated after merge.
   push:
-    branches: [main, "build/**"]
+    branches: [main]
   pull_request:
     branches: [main]
+
+# A newer commit on the same PR makes its older full biological regression
+# irrelevant. Main and independent PRs remain isolated.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -35,6 +44,35 @@ jobs:
             echo "Godot parser diagnostics detected."
             exit 1
           fi
+
+      - name: Validate M10 exact performance equivalence
+        run: godot --headless --path . --script tests/m10_performance_equivalence.gd
+
+      - name: Validate M10 biomass-scaled molecular machinery
+        run: godot --headless --path . --script tests/m10_cell_scale_tests.gd
+
+      - name: Validate M10 replication fidelity and genome costs
+        run: godot --headless --path . --script tests/m10_replication_fidelity_tests.gd
+
+      - name: Validate M10 DNA material conservation
+        run: godot --headless --path . --script tests/m10_dna_material_tests.gd
+
+      - name: Validate M10 molecular history after DNA deletion
+        run: godot --headless --path . --script tests/m10_orphan_protein_function_tests.gd
+
+      - name: Validate M10 cis-regulatory architecture
+        run: godot --headless --path . --script tests/m10_cis_architecture_tests.gd
+
+      - name: Validate M10 observational mutation analytics
+        run: godot --headless --path . --script tests/m10_mutation_analytics_tests.gd
+
+      - name: Validate M10 repair-cost necessity control
+        run: godot --headless --path . --script tests/m10_repair_cost_control.gd
+
+      # The one-off default 16-cell characterization remains reproducible at
+      # tests/m10_plateau_trace.gd. It is intentionally excluded from routine
+      # CI after capturing the causal evidence because it is a long experiment,
+      # not a regression gate.
 
       - name: Run invariant suite
         run: godot --headless --path . --script tests/run_tests.gd

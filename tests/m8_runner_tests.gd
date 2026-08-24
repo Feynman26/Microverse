@@ -18,6 +18,7 @@ func _run() -> void:
 	_test_extinction_is_terminal_and_explained()
 	_test_redox_energy_tradeoff_is_observable()
 	_test_population_threshold_stop_is_explicit()
+	_test_computational_population_limit_is_explicit()
 	_test_batch_order_does_not_change_individual_runs()
 	_test_run_metadata_is_self_identifying()
 
@@ -84,11 +85,12 @@ func _test_extinction_is_terminal_and_explained() -> void:
 	_assert_true(int(result["realized_ticks"]) < int(result["horizon_ticks"]), "stop-on-extinction avoids meaningless post-extinction ticks")
 
 func _test_redox_energy_tradeoff_is_observable() -> void:
-	# The long characterization that motivated M8-A falsified a simple environmental
-	# rescue of the observed ~16-cell plateau: O2=5 and O2=0.5 retained abundant
-	# nutrients but accumulated damage, whereas O2=0 eliminated oxidant and died by
-	# energy failure. CI preserves the mechanism with a short paired assay rather
-	# than repeatedly simulating the expensive multi-generation endpoints.
+	# The long characterization that motivated M8-A established that sustained O2
+	# can eventually accumulate damage while anoxia instead fails energetically.
+	# The compact 600-tick gate should test the upstream causal contrast, not
+	# require residual damage to remain stored after M10 improved biomass-scaled
+	# molecular repair capacity. ROS presence and energetic debt remain the direct
+	# mechanistic signatures of the two environmental arms.
 	var oxidative: Dictionary = _redox_spec(77304, 5.0)
 	var anoxic: Dictionary = _redox_spec(77304, 0.0)
 	var oxidative_result: Dictionary = ExperimentRunnerScript.run(oxidative)
@@ -98,8 +100,8 @@ func _test_redox_energy_tradeoff_is_observable() -> void:
 
 	_assert_true(int(oxidative_result["final_population"]) > 0, "oxygen-rich paired assay remains alive through the short characterization horizon")
 	_assert_true(int(anoxic_result["final_population"]) > 0, "anoxic paired assay is sampled before its known later energy-failure endpoint")
-	_assert_true(float(oxidative_diag["max_damage"]) > float(anoxic_diag["max_damage"]), "oxygen-rich metabolism creates a larger ROS-linked damage burden")
 	_assert_true(float(oxidative_diag["total_intracellular_ros"]) > float(anoxic_diag["total_intracellular_ros"]), "oxygen availability creates measurable intracellular ROS through ordinary chemistry")
+	_assert_true(float(oxidative_diag["total_intracellular_ros"]) > 0.0, "oxygen-rich arm retains a direct oxidative-stress precursor even when repair clears residual damage")
 	_assert_close(float(anoxic_diag["max_damage"]), 0.0, 1e-12, "anoxia removes the oxidative damage source in the paired characterization")
 	_assert_close(float(anoxic_diag["total_intracellular_ros"]), 0.0, 1e-12, "anoxia leaves no intracellular ROS in the ancestral paired characterization")
 	_assert_true(float(anoxic_diag["max_energy_debt"]) > float(oxidative_diag["max_energy_debt"]), "removing oxygen trades oxidative burden for a larger energetic deficit")
@@ -124,6 +126,24 @@ func _test_population_threshold_stop_is_explicit() -> void:
 	_assert_true(String(result["termination_reason"]) == "population_threshold", "runner records a population-threshold stop explicitly")
 	_assert_true(int(result["realized_ticks"]) == 1, "already-satisfied living population threshold stops after the first authoritative tick")
 
+func _test_computational_population_limit_is_explicit() -> void:
+	var spec: Dictionary = ExperimentRunnerScript.create_spec(
+		88416,
+		20,
+		20,
+		EnvironmentScheduleScript.closed()
+	)
+	spec["world_width"] = 8
+	spec["world_height"] = 8
+	spec["max_cells"] = 2
+	spec["mutation_enabled"] = false
+	spec["initial_positions"] = [Vector2(2.0, 2.0), Vector2(5.0, 5.0)]
+	var result: Dictionary = ExperimentRunnerScript.run(spec)
+	_assert_true(String(result["termination_reason"]) == "computational_population_limit", "runner never presents the computational population guard as biological stationarity")
+	_assert_true(bool(result["computational_limit_reached"]), "run metadata explicitly marks computational-cap contact")
+	_assert_true(int(result["computational_population_limit"]) == 2, "run records the exact computational population guard")
+	_assert_true(int(result["realized_ticks"]) == 1, "cap contact terminates before later cap-suppressed physiology can accumulate")
+
 func _test_batch_order_does_not_change_individual_runs() -> void:
 	var spec: Dictionary = _short_constant_spec(1, 400, 40)
 	var forward: Dictionary = ExperimentRunnerScript.run_batch(spec, [801, 802])
@@ -139,6 +159,7 @@ func _test_run_metadata_is_self_identifying() -> void:
 	var result: Dictionary = ExperimentRunnerScript.run(spec)
 	_assert_true(int(result["schema_version"]) == ExperimentRunnerScript.SCHEMA_VERSION, "run records experiment schema version")
 	_assert_true(String(result["model_version"]) == ExperimentRunnerScript.MODEL_VERSION, "run records model version")
+	_assert_true(String(result["model_version"]) == "microverse-m10", "M10 experiments cannot be mislabeled as the historical M8 model")
 	_assert_true(int(result["seed"]) == 99005, "run records exact RNG seed")
 	_assert_true(result.has("death_causes") and result.has("final_resources") and result.has("final_cell_diagnostics"), "run records population-loss, resource, and cellular-stress diagnostics")
 

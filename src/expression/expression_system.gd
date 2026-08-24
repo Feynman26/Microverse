@@ -4,15 +4,16 @@ class_name ExpressionSystem
 const MetabolicSolverScript = preload("res://src/chemistry/metabolic_solver.gd")
 const MetaboliteCatalogScript = preload("res://src/chemistry/metabolite_catalog.gd")
 
-# M5-A state remains unchanged:
 # locus_id -> {"mrna": {coding_signature -> amount}, "protein": {coding_signature -> amount}}
-# M5-B only changes how transcription propensity is calculated. Regulation is
-# derived from physical protein cohorts + inherited promoter motifs + ordinary
-# intracellular ligand concentrations; there are no named response APIs.
+# Expression state is molecular history, not a mirror of current DNA. M10 keeps
+# orphan cohorts after gene deletion so inherited mRNA/protein decay physically;
+# duplicated DNA receives an empty molecular state and must express normally.
 
-static func create_equilibrium_state(genome, config) -> Dictionary:
+static func create_equilibrium_state(genome, config, cell_volume: float = 1.0) -> Dictionary:
+	assert(cell_volume > 0.0)
 	var state: Dictionary = {}
-	var tx_max: float = float(config.transcription_max_events_per_min)
+	var scale: float = _volume_scale(cell_volume, config)
+	var tx_max: float = float(config.transcription_max_events_per_min) * scale
 	var mrna_decay: float = float(config.mrna_decay_rate_per_min)
 	var translation: float = float(config.translation_events_per_mrna_per_min)
 	var protein_decay: float = float(config.protein_decay_rate_per_min)
@@ -24,14 +25,27 @@ static func create_equilibrium_state(genome, config) -> Dictionary:
 		state[int(gene.locus_id)] = {"mrna": {signature: mrna}, "protein": {signature: protein}}
 	return state
 
-static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, config) -> Dictionary:
+# Add molecular containers for newly created DNA loci without manufacturing any
+# transcript/protein. Deleted loci are deliberately retained here: their old
+# molecules remain real until the ordinary decay dynamics remove them.
+static func reconcile_state_with_genome(state: Dictionary, genome) -> void:
+	for gene in genome.genes:
+		var locus_id: int = int(gene.locus_id)
+		if not state.has(locus_id):
+			state[locus_id] = {"mrna": {}, "protein": {}}
+
+static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, config, cell_volume: float = 1.0) -> Dictionary:
 	assert(dt >= 0.0)
+	assert(cell_volume > 0.0)
 	if dt <= 0.0:
 		return _empty_summary()
+	reconcile_state_with_genome(state, genome)
 	_validate_state(state, genome)
 
+	var volume_scale: float = _volume_scale(cell_volume, config)
 	var snapshot: Dictionary = state.duplicate(true)
 	var pool_snapshot: Dictionary = pools.duplicate(true)
+	var genes_by_locus: Dictionary = _genes_by_locus(genome)
 	var tx_proposals: Dictionary = {}
 	var translation_proposals: Dictionary = {}
 	var mrna_decay_proposals: Dictionary = {}
@@ -40,26 +54,31 @@ static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, c
 	var total_tx_events: float = 0.0
 	var total_translation_events: float = 0.0
 
-	var genes: Array = genome.genes.duplicate()
-	genes.sort_custom(func(a, b): return int(a.locus_id) < int(b.locus_id))
-	for gene in genes:
-		var locus_id: int = int(gene.locus_id)
-		var current_signature: int = int(gene.protein_signature)
+	# Iterate molecular loci, not only current DNA loci. For a deleted locus the
+	# gene is null: no new transcription occurs, but inherited mRNA can still be
+	# translated and both RNA/protein decay normally.
+	var loci: Array = snapshot.keys()
+	loci.sort()
+	for locus_variant in loci:
+		var locus_id: int = int(locus_variant)
 		var prior: Dictionary = snapshot[locus_id]
 		var mrna_cohorts: Dictionary = prior["mrna"]
 		var protein_cohorts: Dictionary = prior["protein"]
+		var gene = genes_by_locus.get(locus_id, null)
 
-		var regulation_factor: float = _regulation_factor(gene, snapshot, pool_snapshot, config)
-		regulation_factors[locus_id] = regulation_factor
-		var tx_lambda: float = (
-			float(config.transcription_max_events_per_min)
-			* float(gene.promoter_strength())
-			* regulation_factor
-			* dt
-		)
-		var tx_events: float = float(rng.poisson(tx_lambda))
-		tx_proposals[locus_id] = {"signature": current_signature, "events": tx_events}
-		total_tx_events += tx_events
+		if gene != null:
+			var regulation_factor: float = _regulation_factor(gene, snapshot, pool_snapshot, config, cell_volume)
+			regulation_factors[locus_id] = regulation_factor
+			var tx_lambda: float = (
+				float(config.transcription_max_events_per_min)
+				* volume_scale
+				* float(gene.promoter_strength())
+				* regulation_factor
+				* dt
+			)
+			var tx_events: float = float(rng.poisson(tx_lambda))
+			tx_proposals[locus_id] = {"signature": int(gene.protein_signature), "events": tx_events}
+			total_tx_events += tx_events
 
 		var tl_by_signature: Dictionary = {}
 		var md_by_signature: Dictionary = {}
@@ -94,6 +113,7 @@ static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, c
 	var proteome_capacity: float = (
 		float(config.proteome_capacity_reference_units)
 		* float(config.expression_reference_protein_count)
+		* volume_scale
 	)
 	var translation_capacity: float = (
 		proteome_capacity
@@ -124,8 +144,9 @@ static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, c
 	var accepted_translation: float = 0.0
 	var degraded_mrna: float = 0.0
 	var degraded_protein: float = 0.0
-	for gene in genes:
-		var locus_id: int = int(gene.locus_id)
+	var next_state: Dictionary = {}
+	for locus_variant in loci:
+		var locus_id: int = int(locus_variant)
 		var prior: Dictionary = snapshot[locus_id]
 		var next_mrna: Dictionary = prior["mrna"].duplicate(true)
 		var next_protein: Dictionary = prior["protein"].duplicate(true)
@@ -139,11 +160,12 @@ static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, c
 			var amount: float = float(protein_decay_proposals[locus_id][signature_variant])
 			next_protein[signature] = maxf(0.0, float(next_protein.get(signature, 0.0)) - amount)
 			degraded_protein += amount
-		var tx_record: Dictionary = tx_proposals[locus_id]
-		var tx_signature: int = int(tx_record["signature"])
-		var tx_events: float = float(tx_record["events"]) * tx_scale
-		next_mrna[tx_signature] = float(next_mrna.get(tx_signature, 0.0)) + tx_events
-		accepted_tx += tx_events
+		if tx_proposals.has(locus_id):
+			var tx_record: Dictionary = tx_proposals[locus_id]
+			var tx_signature: int = int(tx_record["signature"])
+			var tx_events: float = float(tx_record["events"]) * tx_scale
+			next_mrna[tx_signature] = float(next_mrna.get(tx_signature, 0.0)) + tx_events
+			accepted_tx += tx_events
 		for signature_variant in translation_proposals[locus_id].keys():
 			var signature: int = int(signature_variant)
 			var events: float = float(translation_proposals[locus_id][signature_variant]) * translation_scale
@@ -151,7 +173,14 @@ static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, c
 			accepted_translation += events
 		_prune_zero_cohorts(next_mrna)
 		_prune_zero_cohorts(next_protein)
-		state[locus_id] = {"mrna": next_mrna, "protein": next_protein}
+		# Once an orphan locus has no molecules left, remove its empty molecular
+		# container. Current DNA loci remain present even when temporarily empty.
+		if genes_by_locus.has(locus_id) or not next_mrna.is_empty() or not next_protein.is_empty():
+			next_state[locus_id] = {"mrna": next_mrna, "protein": next_protein}
+
+	state.clear()
+	for locus_variant in next_state.keys():
+		state[locus_variant] = next_state[locus_variant]
 
 	var synthesis_atp: float = accepted_tx * float(config.transcription_atp_cost_per_event) + accepted_translation * float(config.translation_atp_cost_per_event)
 	MetabolicSolverScript.spend_atp(pools, synthesis_atp)
@@ -177,11 +206,18 @@ static func step(state: Dictionary, genome, pools: Dictionary, dt: float, rng, c
 
 # Generic promoter regulation. Historical protein cohorts retain their original
 # sequence and therefore their own regulatory/allosteric identity after mutation.
-static func _regulation_factor(target_gene, state_snapshot: Dictionary, pools: Dictionary, config) -> float:
+static func _regulation_factor(target_gene, state_snapshot: Dictionary, pools: Dictionary, config, cell_volume: float = 1.0) -> float:
 	if not bool(config.regulation_enabled):
+		return 1.0
+	var regulatory_site_copies: int = int(target_gene.regulatory_copy_number)
+	if regulatory_site_copies <= 0:
 		return 1.0
 	var activator: float = 0.0
 	var repressor: float = 0.0
+	var reference_protein: float = maxf(
+		1e-12,
+		float(config.expression_reference_protein_count) * _volume_scale(cell_volume, config)
+	)
 	var loci: Array = state_snapshot.keys()
 	loci.sort()
 	for locus_variant in loci:
@@ -194,9 +230,16 @@ static func _regulation_factor(target_gene, state_snapshot: Dictionary, pools: D
 			var distance: int = _hamming_distance(signature, int(target_gene.regulatory_signature))
 			if distance > int(config.regulatory_max_distance):
 				continue
-			var abundance: float = maxf(0.0, float(cohorts[signature_variant])) / float(config.expression_reference_protein_count)
+			var abundance: float = maxf(0.0, float(cohorts[signature_variant])) / reference_protein
 			var affinity: float = exp(-float(config.regulatory_distance_decay) * float(distance))
-			var occupancy: float = abundance * affinity * _allosteric_factor(signature, pools, config)
+			# Identical duplicated binding regions contribute independent occupancy
+			# opportunities; deletion to zero removes the cis edge entirely.
+			var occupancy: float = (
+				abundance
+				* affinity
+				* _allosteric_factor(signature, pools, config, cell_volume)
+				* float(regulatory_site_copies)
+			)
 			if (signature & 0x8000) == 0:
 				activator += occupancy
 			else:
@@ -210,14 +253,15 @@ static func _regulation_factor(target_gene, state_snapshot: Dictionary, pools: D
 	)
 
 # Any metabolite can modulate any compatible protein; molecule names never
-# determine biological interpretation. The strongest compatible ligand is used
-# in M5-B to keep allostery bounded and inspectable.
-static func _allosteric_factor(protein_signature: int, pools: Dictionary, config) -> float:
+# determine biological interpretation. Sensing uses concentration, not absolute
+# pool size, so cell growth alone does not change ligand occupancy.
+static func _allosteric_factor(protein_signature: int, pools: Dictionary, config, cell_volume: float = 1.0) -> float:
 	if not bool(config.allostery_enabled):
 		return 1.0
 	var strongest: float = 0.0
+	var volume: float = maxf(1e-12, cell_volume)
 	for metabolite_id in MetaboliteCatalogScript.ids():
-		var amount: float = maxf(0.0, float(pools.get(metabolite_id, 0.0)))
+		var amount: float = maxf(0.0, float(pools.get(metabolite_id, 0.0))) / volume
 		if amount <= 0.0:
 			continue
 		var distance: int = _hamming_distance(protein_signature, MetaboliteCatalogScript.ligand_signature(metabolite_id))
@@ -235,6 +279,15 @@ static func _allosteric_factor(protein_signature: int, pools: Dictionary, config
 		float(config.allosteric_min_factor),
 		float(config.allosteric_max_factor)
 	)
+
+static func _genes_by_locus(genome) -> Dictionary:
+	var result: Dictionary = {}
+	for gene in genome.genes:
+		result[int(gene.locus_id)] = gene
+	return result
+
+static func _volume_scale(cell_volume: float, config) -> float:
+	return maxf(1e-12, cell_volume / maxf(1e-12, float(config.ancestor_volume)))
 
 static func _hamming_distance(first_signature: int, second_signature: int) -> int:
 	var value: int = (first_signature ^ second_signature) & 0xFFFF
@@ -326,8 +379,10 @@ static func _validate_state(state: Dictionary, genome) -> void:
 	for gene in genome.genes:
 		var locus_id: int = int(gene.locus_id)
 		assert(state.has(locus_id), "Missing expression state for locus %d" % locus_id)
+	for locus_variant in state.keys():
+		var locus_id: int = int(locus_variant)
+		assert(state[locus_id].has("mrna") and state[locus_id].has("protein"))
 		for species_name in ["mrna", "protein"]:
-			assert(state[locus_id].has(species_name))
 			for signature_variant in state[locus_id][species_name].keys():
 				var signature: int = int(signature_variant)
 				assert(signature >= 0 and signature <= 0xFFFF)

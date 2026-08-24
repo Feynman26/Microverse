@@ -3,6 +3,10 @@ class_name Genome
 
 const GeneScript = preload("res://src/genetics/gene.gd")
 const FINGERPRINT_MODULUS: int = 2147483647
+# Coarse DNA-copying units. The coding region is one unit; each promoter or
+# regulatory site is one eighth of that unit. Absolute units are model units,
+# but relative genome expansion/reduction now has an explicit copying burden.
+const CIS_REGION_REPLICATION_UNITS: float = 0.125
 
 var genes: Array = []
 
@@ -34,6 +38,7 @@ static func create_ancestor():
 	return Genome.new(ancestor_genes)
 
 func validate() -> void:
+	assert(not genes.is_empty(), "Genome must retain at least one coding locus")
 	var seen: Dictionary = {}
 	for gene in genes:
 		gene.validate()
@@ -45,6 +50,13 @@ func deep_copy():
 
 func gene_count() -> int:
 	return genes.size()
+
+func replication_unit_count() -> float:
+	var units: float = float(genes.size())
+	for gene in genes:
+		units += float(gene.promoter_copy_number) * CIS_REGION_REPLICATION_UNITS
+		units += float(gene.regulatory_copy_number) * CIS_REGION_REPLICATION_UNITS
+	return maxf(CIS_REGION_REPLICATION_UNITS, units)
 
 func get_gene_by_locus(locus_id: int):
 	for gene in genes:
@@ -65,6 +77,9 @@ func fingerprint() -> int:
 		value = int((value * 131 + int(gene.protein_signature)) % FINGERPRINT_MODULUS)
 		value = int((value * 131 + int(gene.regulatory_signature)) % FINGERPRINT_MODULUS)
 		value = int((value * 131 + int(gene.neutral_marker % 1000003)) % FINGERPRINT_MODULUS)
+		# Preserve historical fingerprints for single-copy cis architecture.
+		if int(gene.promoter_copy_number) != 1 or int(gene.regulatory_copy_number) != 1:
+			value = int((value * 131 + int(gene.promoter_copy_number) * 19 + int(gene.regulatory_copy_number) * 23) % FINGERPRINT_MODULUS)
 	return value
 
 func exact_equals(other) -> bool:

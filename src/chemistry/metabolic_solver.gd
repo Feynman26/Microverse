@@ -5,8 +5,10 @@ const CatalyticLandscapeScript = preload("res://src/chemistry/catalytic_landscap
 const MetaboliteCatalogScript = preload("res://src/chemistry/metabolite_catalog.gd")
 
 # Authoritative chemical state lives in each cell. Reaction flux is solved from
-# one pool snapshot and one proteome snapshot per substep. M5 removes promoter
-# code from direct metabolism: only explicit protein abundance can catalyse.
+# one pool snapshot per substep and one realized proteome snapshot per tick.
+# The proteome cannot change during metabolic substeps, so M10 computes each
+# sequence-derived catalytic activity once and reuses it while substrate
+# saturation/pools continue to be resolved independently at every substep.
 
 static func create_initial_pools(volume: float, config) -> Dictionary:
 	var pools: Dictionary = {}
@@ -30,22 +32,31 @@ static func step(pools: Dictionary, genome, expression_state: Dictionary, reacti
 	if dt <= 0.0:
 		return cumulative_fluxes
 
+	# Exact memoization: genome/expression_state are immutable for the complete
+	# metabolic call. Recomputing Hamming-distance proteome recognition in every
+	# numerical substep was redundant CPU work, not additional biology.
+	var catalytic_activities: Dictionary = {}
+	for reaction in reactions:
+		catalytic_activities[reaction.reaction_id] = CatalyticLandscapeScript.proteome_activity(
+			genome, expression_state, reaction, config
+		)
+
 	var substeps: int = maxi(1, int(config.metabolic_substeps_per_tick))
 	var sub_dt: float = dt / float(substeps)
 	for _substep in range(substeps):
-		var fluxes: Dictionary = _solve_substep(pools, genome, expression_state, reactions, sub_dt, volume, config)
+		var fluxes: Dictionary = _solve_substep(pools, reactions, catalytic_activities, sub_dt, volume, config)
 		for reaction_id in fluxes.keys():
 			cumulative_fluxes[reaction_id] = float(cumulative_fluxes[reaction_id]) + float(fluxes[reaction_id])
 		assert_nonnegative(pools)
 	return cumulative_fluxes
 
-static func _solve_substep(pools: Dictionary, genome, expression_state: Dictionary, reactions: Array, dt: float, volume: float, config) -> Dictionary:
+static func _solve_substep(pools: Dictionary, reactions: Array, catalytic_activities: Dictionary, dt: float, volume: float, config) -> Dictionary:
 	var snapshot: Dictionary = pools.duplicate(true)
 	var potential_flux: Dictionary = {}
 	var substrate_demand: Dictionary = {}
 
 	for reaction in reactions:
-		var activity: float = CatalyticLandscapeScript.proteome_activity(genome, expression_state, reaction, config)
+		var activity: float = float(catalytic_activities[reaction.reaction_id])
 		var saturation: float = _limiting_saturation(snapshot, reaction.substrates, volume, float(config.metabolic_km_per_volume))
 		var capacity: float = activity * float(config.metabolic_rate_scale) * volume * dt
 		var requested_flux: float = maxf(0.0, capacity * saturation)
