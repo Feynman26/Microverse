@@ -17,6 +17,7 @@ func _init() -> void:
 func _run() -> void:
 	_test_population_sampling_is_observational()
 	_test_event_ledger_reconstructs_realized_mutations_per_birth()
+	_test_functional_identity_separates_neutral_history()
 	_test_ancestral_departure_proxy_is_structural_not_fitness()
 	_test_environment_shift_association_tracks_mutator_abundance_descriptively()
 	_test_runner_detectors_use_m10_mechanistic_metrics()
@@ -40,6 +41,7 @@ func _test_population_sampling_is_observational() -> void:
 	_assert_close(sim.checksum(), checksum_before, 1e-12, "mutation analytics cannot alter authoritative simulation checksum")
 	_assert_true(int(sim.rng.get_state()) == rng_before, "mutation analytics consume no RNG draws")
 	_assert_true(int(sampled["population"]) == 1 and sampled["lineages"].size() == 1, "population sample reports one ancestral lineage")
+	_assert_true(int(sampled["genetic_genotype_count"]) == 1 and int(sampled["functional_genotype_count"]) == 1, "ancestral population has one genetic and one functional genotype")
 	_assert_close(float(sampled["point_error_rate_per_gene"]["mean"]), config.baseline_point_error_rate_per_gene, 1e-12, "repair-naive ancestor reports baseline copy-error probability")
 	_assert_close(float(sampled["gene_count"]["mean"]), 12.0, 1e-12, "population sample reports physical genome size")
 	_assert_close(float(sampled["ancestral_departure"]["mean"]), 0.0, 1e-12, "canonical ancestor has zero molecular-departure proxy")
@@ -58,17 +60,45 @@ func _test_event_ledger_reconstructs_realized_mutations_per_birth() -> void:
 		{"kind": "birth", "cell_id": 2, "parent_id": 1},
 		{"kind": "birth", "cell_id": 3, "parent_id": 1},
 		{"kind": "mutation", "cell_id": 2, "mutation_type": "protein_signature_bit_flip", "parent_genome_size": 12, "resulting_genome_size": 12},
-		{"kind": "mutation", "cell_id": 2, "mutation_type": "gene_duplication", "parent_genome_size": 12, "resulting_genome_size": 13}
+		{"kind": "mutation", "cell_id": 2, "mutation_type": "gene_duplication", "parent_genome_size": 12, "resulting_genome_size": 13},
+		{"kind": "mutation", "cell_id": 3, "mutation_type": "gene_duplication_blocked", "reason": "insufficient_nucleotide_material", "parent_genome_size": 12, "resulting_genome_size": 12}
 	]
 	var source_before: Array = events.duplicate(true)
 	var summary: Dictionary = MutationDynamicsAnalyticsScript.summarize_event_log(events)
 	_assert_true(events == source_before, "event analytics leave input ledger byte-for-byte semantically unchanged")
 	_assert_true(int(summary["births"]) == 2, "analytics count only descendant births")
-	_assert_true(int(summary["mutations"]) == 2, "analytics count realized mutation events")
+	_assert_true(int(summary["mutations"]) == 2, "analytics count only realized DNA changes as mutations")
+	_assert_true(int(summary["mutation_attempts"]) == 3, "analytics preserve all sampled mutation attempts for auditability")
+	_assert_true(int(summary["blocked_mutation_attempts"]) == 1, "physically blocked structural event is separated from realized mutation count")
 	_assert_close(float(summary["realized_mutations_per_birth"]["mean"]), 1.0, 1e-12, "realized mutations per birth include zero-mutation sisters")
-	_assert_true(int(summary["mutation_types"]["protein_signature_bit_flip"]) == 1 and int(summary["mutation_types"]["gene_duplication"]) == 1, "mutation-type ledger remains inspectable without value labels")
+	_assert_close(float(summary["attempted_mutations_per_birth"]["mean"]), 1.5, 1e-12, "attempted mutation burden retains blocked structural draws")
+	_assert_true(int(summary["mutation_types"]["protein_signature_bit_flip"]) == 1 and int(summary["mutation_types"]["gene_duplication"]) == 1, "realized mutation-type ledger excludes blocked attempts")
+	_assert_true(int(summary["blocked_mutation_types"]["gene_duplication_blocked"]) == 1, "blocked structural attempt remains inspectable by exact type")
 	_assert_close(float(summary["expected_point_error_rate_per_gene"]["mean"]), 0.002, 1e-12, "births inherit the replication-derived expected point-error context")
 	_assert_true(int(summary["births_with_replication_profile"]) == 2, "both daughters resolve to their maternal replication profile")
+
+func _test_functional_identity_separates_neutral_history() -> void:
+	var ancestor = GenomeScript.create_ancestor()
+	var ancestral_function: String = MutationDynamicsAnalyticsScript.functional_key(ancestor)
+
+	var neutral = ancestor.deep_copy()
+	neutral.get_gene_by_locus(1).neutral_marker += 1
+	_assert_true(neutral.canonical_key() != ancestor.canonical_key(), "neutral marker changes exact genetic identity")
+	_assert_true(MutationDynamicsAnalyticsScript.functional_key(neutral) == ancestral_function, "neutral marker does not manufacture functional diversity")
+
+	var reordered = ancestor.deep_copy()
+	reordered.genes.reverse()
+	_assert_true(reordered.canonical_key() != ancestor.canonical_key(), "gene-order rearrangement changes exact genome history")
+	_assert_true(MutationDynamicsAnalyticsScript.functional_key(reordered) == ancestral_function, "gene order is not counted as functional diversity while order has no execution semantics")
+
+	var coding = ancestor.deep_copy()
+	coding.get_gene_by_locus(1).protein_signature ^= 1
+	_assert_true(MutationDynamicsAnalyticsScript.functional_key(coding) != ancestral_function, "coding-sequence change produces distinct functional identity")
+
+	var duplicated = ancestor.deep_copy()
+	var mutator = MutationEngineScript.new()
+	mutator.apply_structural_mutation(duplicated, "gene_duplication", DeterministicRngScript.new(7721))
+	_assert_true(MutationDynamicsAnalyticsScript.functional_key(duplicated) != ancestral_function, "extra expressed locus changes functional inventory even when duplicated sequence is identical")
 
 func _test_ancestral_departure_proxy_is_structural_not_fitness() -> void:
 	var ancestor = GenomeScript.create_ancestor()
