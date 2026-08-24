@@ -10,6 +10,7 @@ const DNAReplicationScript = preload("res://src/genetics/dna_replication.gd")
 
 static func sample_population(sim) -> Dictionary:
 	var lineages: Dictionary = {}
+	var functional_genotypes: Dictionary = {}
 	var point_rates: Array = []
 	var structural_rates: Array = []
 	var repair_values: Array = []
@@ -43,6 +44,8 @@ static func sample_population(sim) -> Dictionary:
 		item["replication_units_sum"] = float(item["replication_units_sum"]) + float(cell.genome.replication_unit_count())
 		item["ancestral_departure_sum"] = float(item["ancestral_departure_sum"]) + float(departure["departure_count"])
 		lineages[key] = item
+		var functional: String = functional_key(cell.genome)
+		functional_genotypes[functional] = int(functional_genotypes.get(functional, 0)) + 1
 		point_rates.append(float(rates["point_error_rate_per_gene"]))
 		structural_rates.append(float(rates["structural_error_rate_per_genome"]))
 		repair_values.append(repair)
@@ -68,6 +71,9 @@ static func sample_population(sim) -> Dictionary:
 		"population": int(sim.population_size()),
 		"tick": int(sim.tick_index),
 		"lineages": lineages,
+		"genetic_genotype_count": lineages.size(),
+		"functional_genotype_count": functional_genotypes.size(),
+		"functional_genotype_frequencies": functional_genotypes,
 		"point_error_rate_per_gene": _distribution(point_rates),
 		"structural_error_rate_per_genome": _distribution(structural_rates),
 		"repair_activity": _distribution(repair_values),
@@ -76,11 +82,33 @@ static func sample_population(sim) -> Dictionary:
 		"ancestral_departure": _distribution(departure_values)
 	}
 
+# Functional identity is deliberately an analytical projection, never an
+# authoritative genome identity. Stable locus IDs, neutral markers and current
+# gene order are ancestry/history information. They are excluded because the
+# present execution model does not use them to determine expression, binding or
+# catalysis. Copy number is retained by keeping one tuple per physical locus.
+static func functional_key(genome) -> String:
+	assert(genome != null)
+	var parts: Array[String] = []
+	for gene in genome.genes:
+		parts.append("%d:%d:%d:PC%d:RC%d" % [
+			int(gene.promoter_code),
+			int(gene.protein_signature),
+			int(gene.regulatory_signature),
+			int(gene.promoter_copy_number),
+			int(gene.regulatory_copy_number)
+		])
+	parts.sort()
+	return "|".join(parts)
+
 static func summarize_event_log(event_log: Array) -> Dictionary:
 	var birth_ids: Dictionary = {}
 	var daughter_profiles: Dictionary = {}
 	var mutations_by_cell: Dictionary = {}
+	var attempts_by_cell: Dictionary = {}
 	var mutation_types: Dictionary = {}
+	var attempted_mutation_types: Dictionary = {}
+	var blocked_mutation_types: Dictionary = {}
 	var genome_size_deltas: Array = []
 	var point_rates: Array = []
 	var structural_rates: Array = []
@@ -104,22 +132,34 @@ static func summarize_event_log(event_log: Array) -> Dictionary:
 			birth_ids[int(event.get("cell_id", -1))] = true
 		elif kind == "mutation":
 			var cell_id: int = int(event.get("cell_id", -1))
-			mutations_by_cell[cell_id] = int(mutations_by_cell.get(cell_id, 0)) + 1
 			var mutation_type: String = String(event.get("mutation_type", "unknown"))
+			attempts_by_cell[cell_id] = int(attempts_by_cell.get(cell_id, 0)) + 1
+			attempted_mutation_types[mutation_type] = int(attempted_mutation_types.get(mutation_type, 0)) + 1
+			if mutation_type.ends_with("_blocked"):
+				blocked_mutation_types[mutation_type] = int(blocked_mutation_types.get(mutation_type, 0)) + 1
+				continue
+			mutations_by_cell[cell_id] = int(mutations_by_cell.get(cell_id, 0)) + 1
 			mutation_types[mutation_type] = int(mutation_types.get(mutation_type, 0)) + 1
 			if event.has("parent_genome_size") and event.has("resulting_genome_size"):
 				genome_size_deltas.append(float(event["resulting_genome_size"]) - float(event["parent_genome_size"]))
 
 	var realized_per_birth: Array = []
+	var attempted_per_birth: Array = []
 	for birth_id_variant in birth_ids.keys():
 		var birth_id: int = int(birth_id_variant)
 		realized_per_birth.append(float(mutations_by_cell.get(birth_id, 0)))
+		attempted_per_birth.append(float(attempts_by_cell.get(birth_id, 0)))
 
 	return {
 		"births": birth_ids.size(),
 		"mutations": _sum_counts(mutation_types),
+		"mutation_attempts": _sum_counts(attempted_mutation_types),
+		"blocked_mutation_attempts": _sum_counts(blocked_mutation_types),
 		"mutation_types": mutation_types,
+		"attempted_mutation_types": attempted_mutation_types,
+		"blocked_mutation_types": blocked_mutation_types,
 		"realized_mutations_per_birth": _distribution(realized_per_birth),
+		"attempted_mutations_per_birth": _distribution(attempted_per_birth),
 		"expected_point_error_rate_per_gene": _distribution(point_rates),
 		"expected_structural_error_rate_per_genome": _distribution(structural_rates),
 		"replication_repair_activity": _distribution(repair_values),
