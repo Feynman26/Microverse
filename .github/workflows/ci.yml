@@ -54,6 +54,9 @@ jobs:
       - name: Validate M11 generic sensing signalling and motor mechanics
         run: godot --headless --path . --script tests/m11_sensing_motor_tests.gd
 
+      - name: Validate M11 authoritative engine integration and replay
+        run: godot --headless --path . --script tests/m11_authoritative_integration_tests.gd
+
       - name: Validate M10 exact performance equivalence
         run: godot --headless --path . --script tests/m10_performance_equivalence.gd
 
