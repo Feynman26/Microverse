@@ -48,6 +48,9 @@ jobs:
       - name: Validate M11 membrane and multiscale diffusion prerequisites
         run: godot --headless --path . --script tests/m11_membrane_diffusion_tests.gd
 
+      - name: Validate M11 extracellular protein turnover
+        run: godot --headless --path . --script tests/m11_extracellular_turnover_tests.gd
+
       - name: Validate M10 exact performance equivalence
         run: godot --headless --path . --script tests/m10_performance_equivalence.gd
 
