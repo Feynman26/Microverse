@@ -14,6 +14,27 @@ const TRANSPORT_DOMAIN_MASK: int = 0x4190
 const ACTIVE_MAX_DISTANCE: int = 4
 const DISTANCE_DECAY: float = 0.70
 
+# M11 membrane prerequisite. The four historical basal resources are anchored
+# to sequence-space targets that coincide with four already-realized ancestral
+# protein cohorts. These are molecular recognition centers, not phenotype flags.
+# The reference activities were derived from the exact M10 ancestor after the
+# finite proteome constraint at volume 1.0. Normalizing by them makes that one
+# reference state reproduce the pre-M11 Vmax/Km uptake exactly; changes in
+# sequence, abundance, deletion history or cell size alter transport through the
+# realized proteome thereafter.
+const BASAL_TARGET_SIGNATURES: Dictionary = {
+	"G": 0x1357,
+	"O2": 0x2468,
+	"NH4": 0x369C,
+	"P": 0x48AD
+}
+const BASAL_REFERENCE_ACTIVITY: Dictionary = {
+	"G": 0.47913446676970634,
+	"O2": 0.41731066460587324,
+	"NH4": 0.5486862442040185,
+	"P": 0.3709428129829984
+}
+
 # Pure molecular recognition cache. A key contains only protein and target
 # signatures; no concentration, resource, RNG or phenotype state is cached.
 static var _affinity_cache: Dictionary = {}
@@ -30,21 +51,37 @@ static func target_signature(metabolite_id: String) -> int:
 	assert(MetaboliteCatalogScript.has_extracellular_field(metabolite_id))
 	return (MetaboliteCatalogScript.ligand_signature(metabolite_id) ^ TRANSPORT_DOMAIN_MASK) & 0xFFFF
 
-static func affinity(protein_signature: int, metabolite_id: String) -> float:
+static func basal_target_signature(metabolite_id: String) -> int:
+	assert(BASAL_TARGET_SIGNATURES.has(metabolite_id), "No basal membrane target for %s" % metabolite_id)
+	return int(BASAL_TARGET_SIGNATURES[metabolite_id]) & 0xFFFF
+
+static func _signature_affinity(protein_signature: int, target: int) -> float:
 	var protein: int = protein_signature & 0xFFFF
-	var target: int = target_signature(metabolite_id)
-	var key: int = (protein << 16) | target
+	var normalized_target: int = target & 0xFFFF
+	var key: int = (protein << 16) | normalized_target
 	if _affinity_cache.has(key):
 		return float(_affinity_cache[key])
-	var distance: int = hamming_distance(protein, target)
+	var distance: int = hamming_distance(protein, normalized_target)
 	var result: float = 0.0 if distance > ACTIVE_MAX_DISTANCE else exp(-DISTANCE_DECAY * float(distance))
 	_affinity_cache[key] = result
 	return result
+
+static func affinity(protein_signature: int, metabolite_id: String) -> float:
+	return _signature_affinity(protein_signature, target_signature(metabolite_id))
+
+static func basal_affinity(protein_signature: int, metabolite_id: String) -> float:
+	return _signature_affinity(protein_signature, basal_target_signature(metabolite_id))
 
 # Transport is a property of proteins that physically exist, not of DNA alone.
 # A coding mutation therefore changes transport only after expression builds a
 # compatible protein cohort, preserving the M5 genotype->proteome causal chain.
 static func proteome_activity(expression_state: Dictionary, metabolite_id: String, config) -> float:
+	return _proteome_activity_against_target(expression_state, target_signature(metabolite_id), config)
+
+static func basal_proteome_activity(expression_state: Dictionary, metabolite_id: String, config) -> float:
+	return _proteome_activity_against_target(expression_state, basal_target_signature(metabolite_id), config)
+
+static func _proteome_activity_against_target(expression_state: Dictionary, target: int, config) -> float:
 	var result: float = 0.0
 	var loci: Array = expression_state.keys()
 	loci.sort()
@@ -56,8 +93,42 @@ static func proteome_activity(expression_state: Dictionary, metabolite_id: Strin
 		for signature_variant in signatures:
 			var protein_signature: int = int(signature_variant)
 			var abundance: float = maxf(0.0, float(cohorts[signature_variant])) / float(config.expression_reference_protein_count)
-			result += abundance * affinity(protein_signature, metabolite_id)
+			result += abundance * _signature_affinity(protein_signature, target)
 	return result
+
+# Reference-calibrated basal import. Only the molecular activity ratio multiplies
+# the historical chemical ceiling; there is no glucose/oxygen adaptation flag.
+# At the exact M10 ancestral reference proteome and volume 1 this is bit-close to
+# the historical request, while abundance naturally scales capacity with cell
+# size and sequence mutations modify affinity.
+static func basal_import_request(
+	internal_amount: float,
+	volume: float,
+	external_amount: float,
+	activity: float,
+	metabolite_id: String,
+	reference_vmax: float,
+	km: float,
+	dt: float,
+	config
+) -> float:
+	assert(internal_amount >= 0.0)
+	assert(volume > 0.0)
+	assert(external_amount >= 0.0)
+	assert(activity >= 0.0)
+	assert(reference_vmax >= 0.0 and km > 0.0 and dt >= 0.0)
+	if dt <= 0.0 or activity <= 0.0:
+		return 0.0
+	var reference_activity: float = float(BASAL_REFERENCE_ACTIVITY[metabolite_id])
+	assert(reference_activity > 0.0)
+	var molecular_scale: float = activity / reference_activity
+	var saturation: float = external_amount / (km + external_amount)
+	var proposed: float = reference_vmax * molecular_scale * saturation * dt
+	var intracellular_capacity: float = maxf(
+		0.0,
+		float(config.intracellular_pool_capacity_per_volume) * volume - internal_amount
+	)
+	return minf(proposed, intracellular_capacity)
 
 # Signed desired exchange: positive means extracellular -> intracellular,
 # negative means intracellular -> extracellular. Direction is determined only
