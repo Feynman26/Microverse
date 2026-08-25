@@ -5,6 +5,7 @@ const MetabolicSolverScript = preload("res://src/chemistry/metabolic_solver.gd")
 const MetaboliteCatalogScript = preload("res://src/chemistry/metabolite_catalog.gd")
 const ExpressionSystemScript = preload("res://src/expression/expression_system.gd")
 const DNAReplicationScript = preload("res://src/genetics/dna_replication.gd")
+const MembraneTransportScript = preload("res://src/transport/membrane_transport.gd")
 
 var id: int
 var parent_id: int
@@ -98,22 +99,28 @@ func proteome_capacity(config) -> float:
 func proteome_utilization(config) -> float:
 	return total_protein() / maxf(1e-12, proteome_capacity(config))
 
+# M11 basal membrane migration. The historical chemical Vmax/Km values remain
+# reference kinetic scales, but actual uptake capacity now comes from proteins
+# that physically exist. DNA mutation alone therefore cannot change uptake until
+# expression/turnover changes the realized membrane-compatible cohort.
 func transport_requests(dt: float, world, config) -> Dictionary:
 	if not alive:
 		return {"glucose": 0.0, "oxygen": 0.0, "nitrogen": 0.0, "phosphorus": 0.0}
 	assert(not metabolites.is_empty(), "Cell metabolism must be initialized before transport")
 	return {
-		"glucose": _transport_request("glucose", "G", float(config.glucose_transport_vmax), float(config.glucose_transport_km), dt, world, config),
-		"oxygen": _transport_request("oxygen", "O2", float(config.oxygen_transport_vmax), float(config.oxygen_transport_km), dt, world, config),
-		"nitrogen": _transport_request("nitrogen", "NH4", float(config.nitrogen_transport_vmax), float(config.nitrogen_transport_km), dt, world, config),
-		"phosphorus": _transport_request("phosphorus", "P", float(config.phosphorus_transport_vmax), float(config.phosphorus_transport_km), dt, world, config)
+		"glucose": _molecular_transport_request("glucose", "G", float(config.glucose_transport_vmax), float(config.glucose_transport_km), dt, world, config),
+		"oxygen": _molecular_transport_request("oxygen", "O2", float(config.oxygen_transport_vmax), float(config.oxygen_transport_km), dt, world, config),
+		"nitrogen": _molecular_transport_request("nitrogen", "NH4", float(config.nitrogen_transport_vmax), float(config.nitrogen_transport_km), dt, world, config),
+		"phosphorus": _molecular_transport_request("phosphorus", "P", float(config.phosphorus_transport_vmax), float(config.phosphorus_transport_km), dt, world, config)
 	}
 
-func _transport_request(world_field: String, internal_id: String, vmax: float, km: float, dt: float, world, config) -> float:
+func _molecular_transport_request(world_field: String, internal_id: String, reference_vmax: float, km: float, dt: float, world, config) -> float:
 	var local_amount: float = maxf(0.0, float(world.sample(world_field, position)))
-	var rate: float = vmax * local_amount / (km + local_amount)
-	var capacity: float = maxf(0.0, float(config.intracellular_pool_capacity_per_volume) * volume - pool(internal_id))
-	return minf(rate * dt, capacity)
+	var activity: float = MembraneTransportScript.basal_proteome_activity(expression_state, internal_id, config)
+	return MembraneTransportScript.basal_import_request(
+		pool(internal_id), volume, local_amount, activity, internal_id,
+		reference_vmax, km, dt, config
+	)
 
 func apply_uptake(uptake: Dictionary) -> void:
 	assert(not metabolites.is_empty())
