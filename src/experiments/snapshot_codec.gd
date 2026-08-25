@@ -7,8 +7,8 @@ const CellStateScript = preload("res://src/biology/cell_state.gd")
 const GeneScript = preload("res://src/genetics/gene.gd")
 const GenomeScript = preload("res://src/genetics/genome.gd")
 
-const SNAPSHOT_SCHEMA_VERSION: int = 2
-const MODEL_IDENTIFIER: String = "microverse-m10"
+const SNAPSHOT_SCHEMA_VERSION: int = 3
+const MODEL_IDENTIFIER: String = "microverse-m11"
 
 const CONFIG_FIELDS: Array[String] = [
 	"tick_dt_min", "world_width", "world_height", "grid_cell_size_um", "max_cells", "seed",
@@ -91,9 +91,14 @@ static func capture_cell(cell) -> Dictionary:
 		"genome": capture_genome(cell.genome),
 		"metabolites": cell.metabolites.duplicate(true),
 		"expression_state": cell.expression_state.duplicate(true),
+		"signalling_state": cell.signalling_state.duplicate(true),
+		"motor_heading": cell.motor_heading,
 		"last_fluxes": cell.last_fluxes.duplicate(true),
 		"last_expression_summary": cell.last_expression_summary.duplicate(true),
 		"last_replication_summary": cell.last_replication_summary.duplicate(true),
+		"last_receptor_summary": cell.last_receptor_summary.duplicate(true),
+		"last_signalling_summary": cell.last_signalling_summary.duplicate(true),
+		"last_motility_summary": cell.last_motility_summary.duplicate(true),
 		"volume": float(cell.volume),
 		"damage": float(cell.damage),
 		"energy_debt": float(cell.energy_debt),
@@ -162,9 +167,14 @@ static func restore_cell(data: Dictionary):
 	cell.genome = restore_genome(data["genome"])
 	cell.metabolites = data["metabolites"].duplicate(true)
 	cell.expression_state = data["expression_state"].duplicate(true)
+	cell.signalling_state = data["signalling_state"].duplicate(true)
+	cell.motor_heading = data["motor_heading"]
 	cell.last_fluxes = data["last_fluxes"].duplicate(true)
 	cell.last_expression_summary = data["last_expression_summary"].duplicate(true)
 	cell.last_replication_summary = data["last_replication_summary"].duplicate(true)
+	cell.last_receptor_summary = data["last_receptor_summary"].duplicate(true)
+	cell.last_signalling_summary = data["last_signalling_summary"].duplicate(true)
+	cell.last_motility_summary = data["last_motility_summary"].duplicate(true)
 	cell.volume = float(data["volume"])
 	cell.damage = float(data["damage"])
 	cell.energy_debt = float(data["energy_debt"])
