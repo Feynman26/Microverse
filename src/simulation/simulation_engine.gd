@@ -14,15 +14,23 @@ const MetabolicSolverScript = preload("res://src/chemistry/metabolic_solver.gd")
 const ReactionCatalogScript = preload("res://src/chemistry/reaction_catalog.gd")
 const ExtracellularReactionCatalogScript = preload("res://src/chemistry/extracellular_reaction_catalog.gd")
 const ExtracellularCatalysisScript = preload("res://src/chemistry/extracellular_catalysis.gd")
+const ExtracellularProteinTurnoverScript = preload("res://src/chemistry/extracellular_protein_turnover.gd")
 const MembraneTransportScript = preload("res://src/transport/membrane_transport.gd")
+const ReceptorSystemScript = preload("res://src/sensing/receptor_system.gd")
+const SignallingSystemScript = preload("res://src/signalling/signalling_system.gd")
+const MotorSystemScript = preload("res://src/motility/motor_system.gd")
 const CellMechanicsScript = preload("res://src/physics/cell_mechanics.gd")
 
-# Historical basal uptake is preserved separately while M7 adds sequence-derived
-# exchange for the secondary extracellular chemistry.
+# Historical basal field names are preserved for diagnostics; M11 routes their
+# actual uptake capacity through realized sequence-derived membrane proteins.
 const TRANSPORTED_RESOURCES: Array[String] = ["glucose", "oxygen", "nitrogen", "phosphorus"]
+const MOTILITY_RNG_XOR: int = 0x4D3131
 
 var config
 var rng
+# Independent stochastic stream prevents motor/tumble draws from phase-shifting
+# transcription, mutation or partition RNG. It is authoritative and snapshotted.
+var motility_rng
 var world
 var mutation_engine
 var reactions: Array = []
@@ -37,11 +45,15 @@ var last_mechanics_summary: Dictionary = {}
 var last_secondary_transport_summary: Dictionary = {}
 var last_protein_secretion_summary: Dictionary = {}
 var last_extracellular_catalysis_summary: Dictionary = {}
+var last_extracellular_protein_turnover_summary: Dictionary = {}
+var last_receptor_summary: Dictionary = {}
+var last_motility_summary: Dictionary = {}
 
 func _init(p_config = null) -> void:
 	config = p_config if p_config != null else SimConfigScript.new()
 	config.validate()
 	rng = DeterministicRngScript.new(config.seed)
+	motility_rng = DeterministicRngScript.new(int(config.seed) ^ MOTILITY_RNG_XOR)
 	mutation_engine = MutationEngineScript.new()
 	reactions = ReactionCatalogScript.create_m4_candidate()
 	ReactionCatalogScript.validate_unique(reactions)
@@ -99,6 +111,14 @@ func _step_once() -> void:
 	last_secondary_transport_summary = _allocate_secondary_membrane_transport(dt)
 	last_protein_secretion_summary = _secrete_extracellular_proteins(dt)
 	last_extracellular_catalysis_summary = ExtracellularCatalysisScript.step(world, extracellular_reactions, dt, config)
+	last_extracellular_protein_turnover_summary = ExtracellularProteinTurnoverScript.step(
+		world,
+		dt,
+		float(config.extracellular_protein_decay_rate_per_min),
+		float(config.translation_aa_cost_per_event),
+		MetaboliteCatalogScript.extracellular_field("AA")
+	)
+	last_receptor_summary = _sample_receptors_and_pay_maintenance(dt)
 
 	# Extracellular products are created after membrane allocation, so another
 	# cell cannot consume a just-created public molecule at zero elapsed time.
@@ -108,6 +128,10 @@ func _step_once() -> void:
 		if cell.alive:
 			cell.step_intracellular(dt, config, reactions, rng)
 
+	# Motility sees current receptor occupancy but the slower activation pool from
+	# the previous tick. The pool is updated only after movement, creating a local
+	# temporal comparison without ever calculating a direction-to-resource vector.
+	last_motility_summary = _apply_motility_and_update_signalling(dt)
 	_process_deaths()
 	_process_divisions()
 	last_mechanics_summary = CellMechanicsScript.relax(cells, world, config, bool(config.mechanical_use_spatial_index))
@@ -342,6 +366,134 @@ func _secrete_extracellular_proteins(dt: float) -> Dictionary:
 		"total_atp_spent": total_atp_spent
 	}
 
+# M11 receptor occupancy samples only local extracellular chemistry. Receptor
+# synthesis is already paid by expression/proteome; this phase adds explicit
+# membrane maintenance and records unmet maintenance as ordinary energy debt.
+func _sample_receptors_and_pay_maintenance(dt: float) -> Dictionary:
+	var by_cell: Dictionary = {}
+	var total_bound: float = 0.0
+	var total_atp_spent: float = 0.0
+	for cell in cells:
+		if not cell.alive:
+			continue
+		var ligands: Dictionary = {}
+		for metabolite_id in MetaboliteCatalogScript.extracellular_ids():
+			var field_name: String = MetaboliteCatalogScript.extracellular_field(metabolite_id)
+			ligands[metabolite_id] = maxf(0.0, float(world.sample(field_name, cell.position)))
+		var occupancy: Dictionary = ReceptorSystemScript.occupancy(
+			cell.expression_state,
+			ligands,
+			cell.volume,
+			float(config.expression_reference_protein_count),
+			float(config.receptor_binding_km),
+			int(config.receptor_max_distance),
+			float(config.receptor_distance_decay)
+		)
+		var required: float = ReceptorSystemScript.maintenance_cost(
+			float(occupancy["receptor_total"]),
+			dt,
+			float(config.receptor_maintenance_atp_cost_per_protein_per_min)
+		)
+		var paid: float = MetabolicSolverScript.spend_atp(cell.metabolites, required)
+		var unmet: float = maxf(0.0, required - paid)
+		cell.energy_debt += unmet
+		cell.last_receptor_summary = occupancy.duplicate(true)
+		occupancy["maintenance_atp_required"] = required
+		occupancy["maintenance_atp_spent"] = paid
+		occupancy["maintenance_unmet"] = unmet
+		by_cell[int(cell.id)] = occupancy.duplicate(true)
+		total_bound += float(occupancy["bound_total"])
+		total_atp_spent += paid
+	return {
+		"by_cell": by_cell,
+		"total_bound": total_bound,
+		"total_atp_spent": total_atp_spent
+	}
+
+func _apply_motility_and_update_signalling(dt: float) -> Dictionary:
+	var by_cell: Dictionary = {}
+	var total_distance: float = 0.0
+	var total_atp_spent: float = 0.0
+	for cell in cells:
+		if not cell.alive:
+			continue
+		var occupied: Dictionary = cell.last_receptor_summary.get("by_signature", {})
+		var motors: Dictionary = MotorSystemScript.realized_motors(
+			cell.expression_state,
+			float(config.expression_reference_protein_count)
+		)
+		var drive: float = MotorSystemScript.control_drive(motors, occupied, cell.signalling_state)
+		var motor_activity: float = 0.0
+		for amount_variant in motors.values():
+			motor_activity += maxf(0.0, float(amount_variant))
+
+		var heading_summary: Dictionary = {
+			"heading": cell.motor_heading,
+			"turned": false,
+			"turn_hazard_per_min": 0.0,
+			"turn_probability": 0.0,
+			"control_drive": drive
+		}
+		if motor_activity > 0.0:
+			heading_summary = MotorSystemScript.update_heading(
+				cell.motor_heading,
+				drive,
+				dt,
+				motility_rng,
+				float(config.motor_baseline_turn_rate_per_min),
+				float(config.motor_control_gain)
+			)
+			cell.motor_heading = heading_summary["heading"]
+
+		var movement: Dictionary = MotorSystemScript.movement_request(
+			motors,
+			cell.motor_heading,
+			dt,
+			float(config.motor_speed_grid_per_min_per_activity)
+		)
+		var funded: Dictionary = MotorSystemScript.funded_displacement(
+			movement["requested_displacement"],
+			cell.pool("ATP"),
+			float(config.motor_atp_cost_per_grid_distance)
+		)
+		var spent: float = MetabolicSolverScript.spend_atp(cell.metabolites, float(funded["atp_spent"]))
+		assert(absf(spent - float(funded["atp_spent"])) <= 1e-10, "Motility pre-allocation exceeded ATP")
+		var displacement: Vector2 = funded["displacement"]
+		if displacement.length_squared() > 0.0:
+			var radius: float = CellMechanicsScript.radius_for_cell(cell, config)
+			cell.position = CellMechanicsScript.clamp_position(cell.position + displacement, radius, world)
+
+		# Update the slow reversible molecular pool only after the motor has read
+		# this tick's fast occupancy against the previous state.
+		cell.last_signalling_summary = SignallingSystemScript.step(
+			cell.signalling_state,
+			occupied,
+			dt,
+			float(config.signalling_activation_rate_per_min),
+			float(config.signalling_decay_rate_per_min)
+		)
+		var summary: Dictionary = {
+			"motors": motors.duplicate(true),
+			"motor_activity": motor_activity,
+			"control_drive": drive,
+			"heading": cell.motor_heading,
+			"turned": bool(heading_summary["turned"]),
+			"requested_distance": float(funded["requested_distance"]),
+			"actual_distance": float(funded["actual_distance"]),
+			"atp_spent": spent,
+			"energy_scale": float(funded["energy_scale"]),
+			"signalling_active_total": SignallingSystemScript.total_active(cell.signalling_state)
+		}
+		cell.last_motility_summary = summary.duplicate(true)
+		by_cell[int(cell.id)] = summary
+		total_distance += float(funded["actual_distance"])
+		total_atp_spent += spent
+	return {
+		"by_cell": by_cell,
+		"total_distance": total_distance,
+		"total_atp_spent": total_atp_spent
+	}
+
 func _process_deaths() -> void:
 	var survivors: Array = []
 	for cell in cells:
@@ -508,5 +660,6 @@ func checksum() -> float:
 	for cell in cells:
 		result += float(cell.checksum())
 	result += float(rng.get_state() % 1000003) * 1e-6
+	result += float(motility_rng.get_state() % 1000003) * 1e-7
 	result += float(next_cell_id) * 0.00017 + float(next_mutation_id) * 0.00019
 	return result
