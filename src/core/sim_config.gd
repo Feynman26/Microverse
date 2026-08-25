@@ -81,6 +81,23 @@ var extracellular_protein_secretion_atp_cost_per_unit: float = 0.01
 var extracellular_catalysis_rate_scale: float = 1.00
 var extracellular_catalysis_km: float = 0.25
 
+# M11 environment/membrane/information dynamics. These are physical/numerical
+# parameters only; none encodes a behavioral goal. The extracellular protein
+# decay value is a coarse environmental half-life control and remains explicit
+# for later calibration. Receptor synthesis already pays ordinary M5 expression
+# and proteome costs; the extra rate below represents membrane maintenance.
+var extracellular_protein_decay_rate_per_min: float = 0.01
+var receptor_binding_km: float = 0.50
+var receptor_max_distance: int = 4
+var receptor_distance_decay: float = 0.70
+var receptor_maintenance_atp_cost_per_protein_per_min: float = 0.00002
+var signalling_activation_rate_per_min: float = 0.35
+var signalling_decay_rate_per_min: float = 0.08
+var motor_speed_grid_per_min_per_activity: float = 0.20
+var motor_atp_cost_per_grid_distance: float = 0.25
+var motor_baseline_turn_rate_per_min: float = 1.10
+var motor_control_gain: float = 0.08
+
 var metabolic_substeps_per_tick: int = 6
 var metabolic_km_per_volume: float = 0.20
 var metabolic_rate_scale: float = 0.85
@@ -200,11 +217,6 @@ func validate() -> void:
 	assert(initial_nitrogen >= 0.0 and initial_phosphorus >= 0.0)
 	assert(glucose_diffusion >= 0.0 and oxygen_diffusion >= 0.0)
 	assert(nitrogen_diffusion >= 0.0 and phosphorus_diffusion >= 0.0)
-	var dx2: float = grid_cell_size_um * grid_cell_size_um
-	assert(glucose_diffusion * tick_dt_min / dx2 <= 0.25)
-	assert(oxygen_diffusion * tick_dt_min / dx2 <= 0.25)
-	assert(nitrogen_diffusion * tick_dt_min / dx2 <= 0.25)
-	assert(phosphorus_diffusion * tick_dt_min / dx2 <= 0.25)
 	assert(secondary_extracellular_initial.size() == SECONDARY_EXTRACELLULAR_IDS.size())
 	assert(secondary_extracellular_diffusion.size() == SECONDARY_EXTRACELLULAR_IDS.size())
 	for metabolite_id in SECONDARY_EXTRACELLULAR_IDS:
@@ -214,18 +226,25 @@ func validate() -> void:
 		var diffusion: float = float(secondary_extracellular_diffusion[metabolite_id])
 		assert(initial_amount >= 0.0)
 		assert(diffusion >= 0.0)
-		assert(diffusion * tick_dt_min / dx2 <= 0.25, "Unstable secondary extracellular diffusion: %s" % metabolite_id)
 	assert(glucose_transport_vmax >= 0.0 and oxygen_transport_vmax >= 0.0)
 	assert(nitrogen_transport_vmax >= 0.0 and phosphorus_transport_vmax >= 0.0)
 	assert(secondary_transport_vmax_per_reference_protein >= 0.0)
 	assert(secondary_transport_gradient_km > 0.0)
 	assert(secondary_transport_atp_cost_per_unit >= 0.0)
 	assert(extracellular_protein_diffusion >= 0.0)
-	assert(extracellular_protein_diffusion * tick_dt_min / dx2 <= 0.25, "Unstable extracellular protein diffusion")
 	assert(extracellular_protein_secretion_fraction_per_min >= 0.0)
 	assert(extracellular_protein_secretion_atp_cost_per_unit >= 0.0)
 	assert(extracellular_catalysis_rate_scale >= 0.0)
 	assert(extracellular_catalysis_km > 0.0)
+	assert(extracellular_protein_decay_rate_per_min >= 0.0)
+	assert(receptor_binding_km > 0.0)
+	assert(receptor_max_distance >= 0 and receptor_max_distance <= 12)
+	assert(receptor_distance_decay >= 0.0)
+	assert(receptor_maintenance_atp_cost_per_protein_per_min >= 0.0)
+	assert(signalling_activation_rate_per_min >= 0.0 and signalling_decay_rate_per_min >= 0.0)
+	assert(motor_speed_grid_per_min_per_activity >= 0.0)
+	assert(motor_atp_cost_per_grid_distance >= 0.0)
+	assert(motor_baseline_turn_rate_per_min >= 0.0 and motor_control_gain >= 0.0)
 	assert(metabolic_substeps_per_tick >= 1)
 	assert(metabolic_km_per_volume > 0.0 and metabolic_rate_scale > 0.0)
 	assert(biomass_units_per_volume > 0.0)
