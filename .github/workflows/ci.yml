@@ -45,6 +45,9 @@ jobs:
             exit 1
           fi
 
+      - name: Validate M11 membrane and multiscale diffusion prerequisites
+        run: godot --headless --path . --script tests/m11_membrane_diffusion_tests.gd
+
       - name: Validate M10 exact performance equivalence
         run: godot --headless --path . --script tests/m10_performance_equivalence.gd
 
