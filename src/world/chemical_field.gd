@@ -17,6 +17,10 @@ var _all_zero: bool = true
 # that uncommon case falls back to a full scan on the next invariant check.
 var _minimum_cache: float = 0.0
 var _minimum_dirty: bool = false
+# Observational numerical provenance. Stable historical regimes stay on the
+# exact explicit path; only alpha above the explicit 2-D bound uses the M11
+# separable implicit solver.
+var last_diffusion_mode: String = "none"
 
 func _init(p_width: int = 1, p_height: int = 1, p_cell_size: float = 1.0, p_diffusion: float = 0.0, initial_value: float = 0.0) -> void:
 	width = p_width
@@ -139,19 +143,27 @@ func maximum_value() -> float:
 		result = maxf(result, value)
 	return result
 
-# Explicit 5-point finite-difference diffusion with reflecting (no-flux)
-# boundaries. Reflecting boundaries are represented by substituting the center
-# value for the missing outside neighbor, preserving the closed chamber's mass.
+# M11 multiscale diffusion. The historical explicit 5-point update remains the
+# exact path whenever alpha=D*dt/dx^2 is within its 2-D stability bound. Larger
+# alpha uses two implicit one-dimensional no-flux solves. Each tridiagonal
+# operator is an M-matrix with unit row sum, so the split step is deterministic,
+# nonnegative and mass-conserving without requiring thousands of explicit
+# microsteps. This is a numerical boundary method, never a cell trait.
 func step_diffusion(dt: float) -> void:
-	# Diffusion of an exactly zero field is exactly a no-op. This skips only work
-	# whose mathematical result is known bit-for-bit, never a small concentration.
 	if _all_zero or diffusion_coefficient == 0.0 or dt == 0.0:
+		last_diffusion_mode = "none"
 		return
 	assert(dt > 0.0)
-	var alpha := diffusion_coefficient * dt / (cell_size * cell_size)
-	assert(alpha <= 0.25 + 1e-12, "Unstable explicit 2D diffusion step")
-	var next_minimum: float = INF
+	var alpha: float = diffusion_coefficient * dt / (cell_size * cell_size)
+	if alpha <= 0.25 + 1e-12:
+		last_diffusion_mode = "explicit"
+		_step_explicit(alpha)
+	else:
+		last_diffusion_mode = "implicit_split"
+		_step_implicit_split(alpha)
 
+func _step_explicit(alpha: float) -> void:
+	var next_minimum: float = INF
 	for y in range(height):
 		for x in range(width):
 			var i := _index(x, y)
@@ -165,12 +177,72 @@ func step_diffusion(dt: float) -> void:
 			var stored_value: float = maxf(0.0, next_value)
 			_buffer[i] = stored_value
 			next_minimum = minf(next_minimum, stored_value)
-
 	var old_values := values
 	values = _buffer
 	_buffer = old_values
 	_minimum_cache = next_minimum
 	_minimum_dirty = false
+
+func _step_implicit_split(alpha: float) -> void:
+	# X solve into the reusable buffer.
+	var rhs := PackedFloat64Array()
+	var solved := PackedFloat64Array()
+	rhs.resize(width)
+	for y in range(height):
+		for x in range(width):
+			rhs[x] = values[_index(x, y)]
+		solved = _solve_reflecting_line(rhs, alpha)
+		for x in range(width):
+			_buffer[_index(x, y)] = solved[x]
+
+	# Y solve back into values.
+	rhs.resize(height)
+	var next_minimum: float = INF
+	for x in range(width):
+		for y in range(height):
+			rhs[y] = _buffer[_index(x, y)]
+		solved = _solve_reflecting_line(rhs, alpha)
+		for y in range(height):
+			var next_value: float = solved[y]
+			assert(next_value >= -1e-9, "Implicit diffusion produced a materially negative concentration")
+			var stored_value: float = maxf(0.0, next_value)
+			values[_index(x, y)] = stored_value
+			next_minimum = minf(next_minimum, stored_value)
+	_minimum_cache = next_minimum
+	_minimum_dirty = false
+	_all_zero = false
+
+# Thomas solve for (I-alpha*L_1D)u=rhs with reflecting/no-flux boundaries.
+# Boundary rows are (1+alpha,-alpha) rather than (1+2alpha,-alpha), matching
+# the same center-substitution boundary used by the historical explicit solver.
+func _solve_reflecting_line(rhs: PackedFloat64Array, alpha: float) -> PackedFloat64Array:
+	var n: int = rhs.size()
+	var result := PackedFloat64Array()
+	result.resize(n)
+	if n == 1:
+		result[0] = rhs[0]
+		return result
+	var c_prime := PackedFloat64Array()
+	var d_prime := PackedFloat64Array()
+	c_prime.resize(n)
+	d_prime.resize(n)
+
+	var b0: float = 1.0 + alpha
+	c_prime[0] = -alpha / b0
+	d_prime[0] = rhs[0] / b0
+	for i in range(1, n):
+		var a: float = -alpha
+		var b: float = 1.0 + alpha if i == n - 1 else 1.0 + 2.0 * alpha
+		var c: float = 0.0 if i == n - 1 else -alpha
+		var denominator: float = b - a * c_prime[i - 1]
+		assert(absf(denominator) > 1e-15)
+		c_prime[i] = c / denominator
+		d_prime[i] = (rhs[i] - a * d_prime[i - 1]) / denominator
+
+	result[n - 1] = d_prime[n - 1]
+	for reverse_index in range(n - 2, -1, -1):
+		result[reverse_index] = d_prime[reverse_index] - c_prime[reverse_index] * result[reverse_index + 1]
+	return result
 
 func checksum() -> float:
 	# Weighted checksum catches spatial differences that total mass cannot.

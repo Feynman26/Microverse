@@ -5,6 +5,8 @@ const MetabolicSolverScript = preload("res://src/chemistry/metabolic_solver.gd")
 const MetaboliteCatalogScript = preload("res://src/chemistry/metabolite_catalog.gd")
 const ExpressionSystemScript = preload("res://src/expression/expression_system.gd")
 const DNAReplicationScript = preload("res://src/genetics/dna_replication.gd")
+const MembraneTransportScript = preload("res://src/transport/membrane_transport.gd")
+const SignallingSystemScript = preload("res://src/signalling/signalling_system.gd")
 
 var id: int
 var parent_id: int
@@ -22,6 +24,14 @@ var expression_state: Dictionary = {}
 var last_fluxes: Dictionary = {}
 var last_expression_summary: Dictionary = {}
 var last_replication_summary: Dictionary = {}
+# M11 reversible activation molecules and physical orientation. Neither is a
+# behavioral label: signalling_state is keyed only by molecular signature and
+# motor_heading is ordinary geometry required by any active force generator.
+var signalling_state: Dictionary = {}
+var motor_heading: Vector2 = Vector2.RIGHT
+var last_receptor_summary: Dictionary = {}
+var last_signalling_summary: Dictionary = {}
+var last_motility_summary: Dictionary = {}
 var volume: float = 1.0
 var damage: float = 0.0
 var energy_debt: float = 0.0
@@ -61,6 +71,11 @@ func initialize_molecular_state(config) -> void:
 	last_fluxes = {}
 	last_expression_summary = {}
 	last_replication_summary = {}
+	signalling_state = {}
+	motor_heading = Vector2.RIGHT
+	last_receptor_summary = {}
+	last_signalling_summary = {}
+	last_motility_summary = {}
 	_sync_volume_from_biomass(config)
 	_reset_replication_cycle()
 	# Controlled fixtures historically construct already division-sized cells.
@@ -98,22 +113,28 @@ func proteome_capacity(config) -> float:
 func proteome_utilization(config) -> float:
 	return total_protein() / maxf(1e-12, proteome_capacity(config))
 
+# M11 basal membrane migration. The historical chemical Vmax/Km values remain
+# reference kinetic scales, but actual uptake capacity now comes from proteins
+# that physically exist. DNA mutation alone therefore cannot change uptake until
+# expression/turnover changes the realized membrane-compatible cohort.
 func transport_requests(dt: float, world, config) -> Dictionary:
 	if not alive:
 		return {"glucose": 0.0, "oxygen": 0.0, "nitrogen": 0.0, "phosphorus": 0.0}
 	assert(not metabolites.is_empty(), "Cell metabolism must be initialized before transport")
 	return {
-		"glucose": _transport_request("glucose", "G", float(config.glucose_transport_vmax), float(config.glucose_transport_km), dt, world, config),
-		"oxygen": _transport_request("oxygen", "O2", float(config.oxygen_transport_vmax), float(config.oxygen_transport_km), dt, world, config),
-		"nitrogen": _transport_request("nitrogen", "NH4", float(config.nitrogen_transport_vmax), float(config.nitrogen_transport_km), dt, world, config),
-		"phosphorus": _transport_request("phosphorus", "P", float(config.phosphorus_transport_vmax), float(config.phosphorus_transport_km), dt, world, config)
+		"glucose": _molecular_transport_request("glucose", "G", float(config.glucose_transport_vmax), float(config.glucose_transport_km), dt, world, config),
+		"oxygen": _molecular_transport_request("oxygen", "O2", float(config.oxygen_transport_vmax), float(config.oxygen_transport_km), dt, world, config),
+		"nitrogen": _molecular_transport_request("nitrogen", "NH4", float(config.nitrogen_transport_vmax), float(config.nitrogen_transport_km), dt, world, config),
+		"phosphorus": _molecular_transport_request("phosphorus", "P", float(config.phosphorus_transport_vmax), float(config.phosphorus_transport_km), dt, world, config)
 	}
 
-func _transport_request(world_field: String, internal_id: String, vmax: float, km: float, dt: float, world, config) -> float:
+func _molecular_transport_request(world_field: String, internal_id: String, reference_vmax: float, km: float, dt: float, world, config) -> float:
 	var local_amount: float = maxf(0.0, float(world.sample(world_field, position)))
-	var rate: float = vmax * local_amount / (km + local_amount)
-	var capacity: float = maxf(0.0, float(config.intracellular_pool_capacity_per_volume) * volume - pool(internal_id))
-	return minf(rate * dt, capacity)
+	var activity: float = MembraneTransportScript.basal_proteome_activity(expression_state, internal_id, config)
+	return MembraneTransportScript.basal_import_request(
+		pool(internal_id), volume, local_amount, activity, internal_id,
+		reference_vmax, km, dt, config
+	)
 
 func apply_uptake(uptake: Dictionary) -> void:
 	assert(not metabolites.is_empty())
@@ -262,12 +283,17 @@ func create_daughters(first_id: int, second_id: int, tick: int, rng, world, conf
 
 	var metabolite_partitions: Array = MetabolicSolverScript.partition(metabolites, ratio)
 	var expression_partitions: Array = ExpressionSystemScript.partition(expression_state, ratio, rng, config)
+	var signalling_partitions: Array = SignallingSystemScript.partition(signalling_state, ratio)
 	var first = CellState.new(first_id, id, generation + 1, tick, world.clamp_position(position + first_offset), volume * ratio)
 	var second = CellState.new(second_id, id, generation + 1, tick, world.clamp_position(position + second_offset), volume * (1.0 - ratio))
 	first.metabolites = metabolite_partitions[0]
 	second.metabolites = metabolite_partitions[1]
 	first.expression_state = expression_partitions[0]
 	second.expression_state = expression_partitions[1]
+	first.signalling_state = signalling_partitions[0]
+	second.signalling_state = signalling_partitions[1]
+	first.motor_heading = motor_heading
+	second.motor_heading = motor_heading
 	first.damage = damage * ratio
 	second.damage = damage * (1.0 - ratio)
 	first.energy_debt = energy_debt * ratio
@@ -341,6 +367,9 @@ func _assert_state(config) -> void:
 	assert(replication_gene_equivalents_copied >= -1e-10)
 	assert(replication_atp_spent >= -1e-10 and replication_nuc_spent >= -1e-10)
 	assert(replication_repair_activity_integral >= -1e-10)
+	for amount_variant in signalling_state.values():
+		assert(float(amount_variant) >= -1e-10)
+	assert(motor_heading.length_squared() > 1e-18)
 	MetabolicSolverScript.assert_nonnegative(metabolites)
 	assert(absf(volume - pool("BIO") / float(config.biomass_units_per_volume)) <= 1e-10)
 	if genome != null:
@@ -361,6 +390,9 @@ func checksum() -> float:
 		+ replication_atp_spent * 0.053
 		+ replication_nuc_spent * 0.059
 		+ replication_repair_activity_integral * 0.061
+		+ motor_heading.x * 0.067
+		+ motor_heading.y * 0.071
+		+ SignallingSystemScript.checksum(signalling_state) * 0.073
 		+ MetabolicSolverScript.checksum(metabolites) * 0.001
 		+ ExpressionSystemScript.checksum(expression_state) * 0.017
 	)
