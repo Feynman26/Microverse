@@ -21,7 +21,12 @@ const CONFIG_FIELDS: Array[String] = [
 	"secondary_transport_gradient_km", "secondary_transport_atp_cost_per_unit",
 	"extracellular_protein_diffusion", "extracellular_protein_secretion_fraction_per_min",
 	"extracellular_protein_secretion_atp_cost_per_unit", "extracellular_catalysis_rate_scale",
-	"extracellular_catalysis_km", "metabolic_substeps_per_tick", "metabolic_km_per_volume",
+	"extracellular_catalysis_km", "extracellular_protein_decay_rate_per_min",
+	"receptor_binding_km", "receptor_max_distance", "receptor_distance_decay",
+	"receptor_maintenance_atp_cost_per_protein_per_min", "signalling_activation_rate_per_min",
+	"signalling_decay_rate_per_min", "motor_speed_grid_per_min_per_activity",
+	"motor_atp_cost_per_grid_distance", "motor_baseline_turn_rate_per_min", "motor_control_gain",
+	"metabolic_substeps_per_tick", "metabolic_km_per_volume",
 	"metabolic_rate_scale", "biomass_units_per_volume", "initial_atp_per_volume", "initial_adp_per_volume",
 	"initial_nad_per_volume", "initial_nadh_per_volume", "transcription_max_events_per_min",
 	"mrna_decay_rate_per_min", "translation_events_per_mrna_per_min", "protein_decay_rate_per_min",
@@ -55,6 +60,7 @@ static func capture(sim, experiment_context: Dictionary = {}) -> Dictionary:
 		"tick_index": int(sim.tick_index),
 		"simulation_time_min": float(sim.simulation_time_min),
 		"rng_state": int(sim.rng.get_state()),
+		"motility_rng_state": int(sim.motility_rng.get_state()),
 		"world": _capture_world(sim.world),
 		"cells": [],
 		"next_cell_id": int(sim.next_cell_id),
@@ -64,6 +70,9 @@ static func capture(sim, experiment_context: Dictionary = {}) -> Dictionary:
 		"last_secondary_transport_summary": sim.last_secondary_transport_summary.duplicate(true),
 		"last_protein_secretion_summary": sim.last_protein_secretion_summary.duplicate(true),
 		"last_extracellular_catalysis_summary": sim.last_extracellular_catalysis_summary.duplicate(true),
+		"last_extracellular_protein_turnover_summary": sim.last_extracellular_protein_turnover_summary.duplicate(true),
+		"last_receptor_summary": sim.last_receptor_summary.duplicate(true),
+		"last_motility_summary": sim.last_motility_summary.duplicate(true),
 		"scheduled_interventions": experiment_context.get("scheduled_interventions", []).duplicate(true),
 		"environment_boundary_state": _clone_variant(experiment_context.get("environment_boundary_state", {})),
 		"source_checksum": float(sim.checksum())
@@ -136,6 +145,7 @@ static func restore(snapshot: Dictionary):
 	sim.tick_index = int(snapshot["tick_index"])
 	sim.simulation_time_min = float(snapshot["simulation_time_min"])
 	sim.rng.set_state(int(snapshot["rng_state"]))
+	sim.motility_rng.set_state(int(snapshot["motility_rng_state"]))
 	_restore_world(sim.world, snapshot["world"])
 	sim.cells.clear()
 	for cell_data_variant in snapshot["cells"]:
@@ -147,6 +157,9 @@ static func restore(snapshot: Dictionary):
 	sim.last_secondary_transport_summary = snapshot["last_secondary_transport_summary"].duplicate(true)
 	sim.last_protein_secretion_summary = snapshot["last_protein_secretion_summary"].duplicate(true)
 	sim.last_extracellular_catalysis_summary = snapshot["last_extracellular_catalysis_summary"].duplicate(true)
+	sim.last_extracellular_protein_turnover_summary = snapshot["last_extracellular_protein_turnover_summary"].duplicate(true)
+	sim.last_receptor_summary = snapshot["last_receptor_summary"].duplicate(true)
+	sim.last_motility_summary = snapshot["last_motility_summary"].duplicate(true)
 	return sim
 
 static func restore_config(data: Dictionary):
@@ -270,7 +283,7 @@ static func _restore_world(world, data: Dictionary) -> void:
 static func _validate_snapshot(snapshot: Dictionary) -> void:
 	assert(int(snapshot.get("schema_version", -1)) == SNAPSHOT_SCHEMA_VERSION)
 	assert(String(snapshot.get("model_identifier", "")) == MODEL_IDENTIFIER)
-	for required_key in ["config", "tick_index", "simulation_time_min", "rng_state", "world", "cells", "next_cell_id", "next_mutation_id", "event_log"]:
+	for required_key in ["config", "tick_index", "simulation_time_min", "rng_state", "motility_rng_state", "world", "cells", "next_cell_id", "next_mutation_id", "event_log"]:
 		assert(snapshot.has(required_key), "Snapshot missing authoritative key: %s" % required_key)
 
 static func _clone_variant(value):
