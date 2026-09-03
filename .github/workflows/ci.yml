@@ -48,6 +48,21 @@ jobs:
       - name: Validate M10 exact performance equivalence
         run: godot --headless --path . --script tests/m10_performance_equivalence.gd
 
+      - name: Validate P0 profiler is scientifically observational
+        run: godot --headless --path . --script tests/p0_profiling_equivalence.gd
+
+      - name: Smoke-test P0 baseline runner
+        run: |
+          godot --headless --path . --script benchmarks/p0_baseline.gd -- --warmup=0 --ticks=1 --populations=1,16,64 --output=/tmp/p0-smoke.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('/tmp/p0-smoke.json').read_text())
+          assert report['schema_version'] == 1
+          assert [item['initial_population'] for item in report['results']] == [1, 16, 64]
+          assert all('tick_total' in item['phase_profile'] for item in report['results'])
+          PY
+
       - name: Validate M10 biomass-scaled molecular machinery
         run: godot --headless --path . --script tests/m10_cell_scale_tests.gd
 

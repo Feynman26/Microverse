@@ -104,11 +104,26 @@ godot --headless --path . --script tests/m4_metabolism_tests.gd
 godot --headless --path . --script tests/m5_expression_tests.gd
 ```
 
+## P0 performance baseline
+
+Architecture v2 begins with observational P0 instrumentation. Run the frozen
+1/16/64/256/1000-cell headless suite with:
+
+```bash
+GODOT_BIN=godot bash benchmarks/run_p0.sh p0-baseline.json
+```
+
+See `docs/P0_PERFORMANCE_BASELINE.md` for the measurement contract, target
+workstation procedure and interpretation limits. Profiling is disabled in
+ordinary simulations and does not enter biological state or checksums.
+
 The current gates include diffusion/nonnegativity; fair resource allocation; exact genome and molecular inheritance; reaction-order independence; digital C/N/P conservation; ATP+ADP and NAD+NADH conservation; sparse-but-connected catalytic-landscape statistics; aerobic versus hypoxic metabolism; one-mutation activation of a dormant metabolic route; catalytic BIO assembly; exact stochastic expression replay; clone phenotypic divergence across seeds; expression structural/energy accounting; gene-order independence; mutation-to-protein lag; stochastic sister partition; Poisson statistics; resource-scarcity scaling; resource-supported division; extinction without replenishable energy; and complete same-seed state/history reproducibility.
 
 ## Documentation
 
 - `docs/ARCHITECTURE.md` — system boundaries, tick semantics, target genome/protein/chemistry architecture, persistence, analytics and performance rules.
+- `docs/ARCHITECTURE_V2.md` — scalable multiscale target, Biological LOD,
+  deterministic parallelism and P0–P10 migration gates.
 - `docs/SCIENTIFIC_MODEL.md` — biological abstractions, equations, assumptions, limitations and validation hierarchy.
 - `docs/M3_GENETICS.md` — gene/genome representation, inheritance and mutation semantics.
 - `docs/M4_CATALYTIC_LANDSCAPE.md` — catalytic-affinity landscape design and statistical gate.
