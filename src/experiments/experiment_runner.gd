@@ -2,9 +2,10 @@ extends RefCounted
 class_name ExperimentRunner
 
 const SimConfigScript = preload("res://src/core/sim_config.gd")
-const SimulationEngineScript = preload("res://src/simulation/simulation_engine.gd")
 const EnvironmentScheduleScript = preload("res://src/experiments/environment_schedule.gd")
 const MutationDynamicsAnalyticsScript = preload("res://src/experiments/mutation_dynamics_analytics.gd")
+const LegacySimulationBackendScript = preload("res://src/runtime/legacy_simulation_backend.gd")
+const SimulationCommandScript = preload("res://src/runtime/simulation_command.gd")
 
 const SCHEMA_VERSION: int = 2
 const MODEL_VERSION: String = "microverse-m10"
@@ -40,8 +41,11 @@ static func create_spec(
 static func run(spec: Dictionary) -> Dictionary:
 	_validate_spec(spec)
 	var config = _create_config(spec)
-	var sim = SimulationEngineScript.new(config)
-	_seed_initial_population(sim, spec)
+	var backend = LegacySimulationBackendScript.new(config)
+	_seed_initial_population(backend, spec)
+	# P2 keeps existing analytics on an explicitly read-only adapter view. Every
+	# authoritative mutation below enters through a versioned backend command.
+	var sim = backend.legacy_inspection_state()
 
 	var horizon_ticks: int = int(spec["horizon_ticks"])
 	var sample_every: int = int(spec["sample_every_ticks"])
@@ -57,9 +61,9 @@ static func run(spec: Dictionary) -> Dictionary:
 
 	trajectory.append(_sample(sim))
 	for tick in range(horizon_ticks):
-		_apply_interventions(sim, tick, interventions, int(spec["seed"]), intervention_log)
-		EnvironmentScheduleScript.apply(sim, tick, environment)
-		sim.step(1)
+		_apply_interventions(backend, tick, interventions, int(spec["seed"]), intervention_log)
+		backend.execute(SimulationCommandScript.apply_environment(tick, environment))
+		backend.execute(SimulationCommandScript.advance_ticks(1))
 		realized_ticks += 1
 		max_population = maxi(max_population, sim.population_size())
 		var extinct: bool = sim.population_size() == 0
@@ -211,14 +215,14 @@ static func _create_config(spec: Dictionary):
 	config.validate()
 	return config
 
-static func _seed_initial_population(sim, spec: Dictionary) -> void:
+static func _seed_initial_population(backend, spec: Dictionary) -> void:
 	var positions: Array = spec.get("initial_positions", [])
 	if positions.is_empty():
-		sim.seed_ancestor()
+		backend.execute(SimulationCommandScript.seed_ancestor())
 		return
 	for position_variant in positions:
 		assert(position_variant is Vector2)
-		sim.seed_ancestor(position_variant)
+		backend.execute(SimulationCommandScript.seed_ancestor(position_variant))
 
 static func _sample(sim) -> Dictionary:
 	return {
@@ -239,7 +243,7 @@ static func _sample(sim) -> Dictionary:
 		"checksum": sim.checksum()
 	}
 
-static func _apply_interventions(sim, tick: int, interventions: Array, seed: int, log: Array) -> void:
+static func _apply_interventions(backend, tick: int, interventions: Array, seed: int, log: Array) -> void:
 	for intervention_variant in interventions:
 		var intervention: Dictionary = intervention_variant
 		if int(intervention.get("tick", -1)) != tick:
@@ -247,32 +251,10 @@ static func _apply_interventions(sim, tick: int, interventions: Array, seed: int
 		match String(intervention.get("kind", "")):
 			"serial_transfer":
 				var survivors: int = int(intervention.get("survivors", 1))
-				var before: int = sim.population_size()
-				if before <= survivors:
-					log.append({"tick": tick, "kind": "serial_transfer", "before": before, "after": before, "removed_ids": []})
-					continue
-				var ranked: Array = []
-				for cell in sim.cells:
-					ranked.append({"rank": _intervention_rank(seed, tick, int(cell.id)), "cell": cell})
-				ranked.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-					if int(a["rank"]) == int(b["rank"]):
-						return int(a["cell"].id) < int(b["cell"].id)
-					return int(a["rank"]) < int(b["rank"])
+				var delta: Dictionary = backend.execute(
+					SimulationCommandScript.serial_transfer(seed, tick, survivors)
 				)
-				var kept: Array = []
-				var removed_ids: Array = []
-				for i in range(ranked.size()):
-					if i < survivors:
-						kept.append(ranked[i]["cell"])
-					else:
-						removed_ids.append(int(ranked[i]["cell"].id))
-				sim.cells = kept
-				log.append({"tick": tick, "kind": "serial_transfer", "before": before, "after": kept.size(), "removed_ids": removed_ids})
-
-static func _intervention_rank(seed: int, tick: int, cell_id: int) -> int:
-	var value: int = (seed ^ (tick * 1103515245) ^ (cell_id * 2654435761)) & 0x7fffffff
-	value = (value * 1664525 + 1013904223) & 0x7fffffff
-	return value
+				log.append(delta["details"].duplicate(true))
 
 static func _genotype_frequencies(sim) -> Dictionary:
 	var counts: Dictionary = {}

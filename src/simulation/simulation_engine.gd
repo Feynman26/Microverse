@@ -98,6 +98,7 @@ func step(tick_count: int = 1) -> void:
 func _step_once() -> void:
 	var tick_started: int = performance_profiler.begin_phase()
 	var dt: float = float(config.tick_dt_min)
+	_record_structural_work()
 	var phase_started: int = performance_profiler.begin_phase()
 	world.diffuse(dt)
 	performance_profiler.end_phase(&"diffusion", phase_started)
@@ -145,6 +146,29 @@ func _step_once() -> void:
 	tick_index += 1
 	simulation_time_min += dt
 	performance_profiler.end_phase(&"tick_total", tick_started)
+
+func _record_structural_work() -> void:
+	if not performance_profiler.enabled:
+		return
+	var cell_count: int = cells.size()
+	var field_count: int = world.field_order.size() + world.protein_fields.size()
+	var lattice_size: int = world.width * world.height
+	performance_profiler.add_work(&"ticks", 1)
+	performance_profiler.add_work(&"diffusion_eligible_field_lattice_slots", field_count * lattice_size)
+	performance_profiler.add_work(&"basal_transport_cell_resource_pairs", cell_count * TRANSPORTED_RESOURCES.size())
+	performance_profiler.add_work(
+		&"secondary_transport_cell_metabolite_pairs",
+		cell_count * config.SECONDARY_EXTRACELLULAR_IDS.size()
+	)
+	performance_profiler.add_work(&"protein_secretion_cell_visits", cell_count)
+	performance_profiler.add_work(
+		&"extracellular_reaction_lattice_slots",
+		extracellular_reactions.size() * lattice_size
+	)
+	performance_profiler.add_work(&"intracellular_cell_steps", cell_count)
+	performance_profiler.add_work(&"lifecycle_cell_visits", cell_count * 2)
+	performance_profiler.add_work(&"mechanics_body_visits", cell_count)
+	performance_profiler.add_work(&"invariant_field_lattice_slots", field_count * lattice_size)
 
 func _allocate_membrane_transport(dt: float) -> void:
 	var records: Array = []

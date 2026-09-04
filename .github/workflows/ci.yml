@@ -54,6 +54,9 @@ jobs:
       - name: Validate P1 responsive runtime and exact threaded stepping
         run: godot --headless --path . --script tests/p1_responsive_runtime_tests.gd
 
+      - name: Validate P2 backend commands deltas and legacy equivalence
+        run: godot --headless --path . --script tests/p2_runtime_contract_tests.gd
+
       - name: Smoke-test P0 baseline runner
         run: |
           godot --headless --path . --script benchmarks/p0_baseline.gd -- --warmup=0 --ticks=1 --populations=1,16,64 --output=/tmp/p0-smoke.json

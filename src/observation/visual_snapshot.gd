@@ -2,6 +2,7 @@ extends RefCounted
 class_name VisualSnapshot
 
 const DNAReplicationScript = preload("res://src/genetics/dna_replication.gd")
+const SCHEMA_VERSION: int = 1
 
 # Produces an immutable-by-contract presentation view. No authoritative object
 # reference is published: the UI receives only scalar values and fresh packed
@@ -19,6 +20,8 @@ static func capture(simulation) -> Dictionary:
 		volumes[index] = float(cell.volume)
 
 	return {
+		"schema_version": SCHEMA_VERSION,
+		"snapshot_kind": "visual",
 		"tick": int(simulation.tick_index),
 		"simulation_time_min": float(simulation.simulation_time_min),
 		"population": int(simulation.population_size()),
