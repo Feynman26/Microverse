@@ -9,16 +9,23 @@ var _warmup_ticks: int = 3
 var _measured_ticks: int = 10
 var _populations: Array[int] = DEFAULT_POPULATIONS.duplicate()
 var _output_path: String = ""
+var _failure_message: String = ""
 
 func _init() -> void:
 	call_deferred("_run")
 
 func _run() -> void:
-	_parse_args(OS.get_cmdline_user_args())
+	if not _parse_args(OS.get_cmdline_user_args()):
+		return
 	var results: Array = []
 	for population in _populations:
 		print("P3: comparing dense and legacy metabolism at %d cells" % population)
-		results.append(_compare(population))
+		var comparison: Dictionary = _compare(population)
+		if comparison.is_empty():
+			push_error("P3 benchmark aborted: %s" % _failure_message)
+			quit(4)
+			return
+		results.append(comparison)
 	var report: Dictionary = {
 		"schema_version": SCHEMA_VERSION,
 		"model_version": "microverse-m10",
@@ -35,17 +42,24 @@ func _run() -> void:
 	print("P3_RESULT_JSON_BEGIN")
 	print(json)
 	print("P3_RESULT_JSON_END")
-	if not _output_path.is_empty():
-		_write_report(_output_path, json)
+	if not _output_path.is_empty() and not _write_report(_output_path, json):
+		quit(3)
+		return
 	quit(0)
 
 func _compare(population: int) -> Dictionary:
 	var dense = _create_simulation(population, true)
 	var legacy = _create_simulation(population, false)
+	if dense.compiled_reactions == null or legacy.compiled_reactions == null:
+		return _fail_comparison(
+			population,
+			"compiled reaction network did not load; close Godot and rebuild the project cache"
+		)
 	for _tick in range(_warmup_ticks):
 		dense.step(1)
 		legacy.step(1)
-	assert(dense.checksum() == legacy.checksum())
+		if dense.checksum() != legacy.checksum():
+			return _fail_comparison(population, "dense and M10 checksums diverged during warmup")
 
 	var dense_usec: int = 0
 	var legacy_usec: int = 0
@@ -58,8 +72,10 @@ func _compare(population: int) -> Dictionary:
 		else:
 			legacy_usec += _measure_step(legacy)
 			dense_usec += _measure_step(dense)
-		assert(dense.checksum() == legacy.checksum())
-	assert(dense.event_log == legacy.event_log)
+		if dense.checksum() != legacy.checksum():
+			return _fail_comparison(population, "dense and M10 checksums diverged at measured tick %d" % (tick + 1))
+	if dense.event_log != legacy.event_log:
+		return _fail_comparison(population, "dense and M10 event histories diverged")
 	return {
 		"initial_population": population,
 		"final_population": dense.population_size(),
@@ -72,6 +88,10 @@ func _compare(population: int) -> Dictionary:
 		"exact_checksum": dense.checksum(),
 		"event_count": dense.event_log.size()
 	}
+
+func _fail_comparison(population: int, message: String) -> Dictionary:
+	_failure_message = "%d cells: %s" % [population, message]
+	return {}
 
 func _measure_step(sim) -> int:
 	var started: int = Time.get_ticks_usec()
@@ -109,7 +129,7 @@ func _machine_manifest() -> Dictionary:
 		"processor_count": OS.get_processor_count()
 	}
 
-func _parse_args(args: PackedStringArray) -> void:
+func _parse_args(args: PackedStringArray) -> bool:
 	for argument in args:
 		if argument.begins_with("--warmup="):
 			_warmup_ticks = int(argument.trim_prefix("--warmup="))
@@ -124,14 +144,18 @@ func _parse_args(args: PackedStringArray) -> void:
 		else:
 			push_error("Unknown P3 benchmark argument: %s" % argument)
 			quit(2)
-			return
-	assert(_warmup_ticks >= 0 and _measured_ticks > 0 and not _populations.is_empty())
+			return false
+	if _warmup_ticks < 0 or _measured_ticks <= 0 or _populations.is_empty():
+		push_error("Invalid P3 benchmark parameters")
+		quit(2)
+		return false
+	return true
 
-func _write_report(path: String, json: String) -> void:
+func _write_report(path: String, json: String) -> bool:
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
 		push_error("Could not write P3 report to %s" % path)
-		quit(3)
-		return
+		return false
 	file.store_string(json + "\n")
 	file.close()
+	return true

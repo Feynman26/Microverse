@@ -69,6 +69,13 @@ jobs:
           report = json.loads(Path('/tmp/p3-smoke.json').read_text())
           assert report['schema_version'] == 1
           assert [item['initial_population'] for item in report['results']] == [1, 16, 64]
+          required = {
+              'initial_population', 'final_population', 'measured_ticks',
+              'dense_elapsed_usec', 'legacy_elapsed_usec',
+              'dense_ticks_per_second', 'legacy_ticks_per_second', 'speedup',
+              'exact_checksum', 'event_count'
+          }
+          assert all(required <= set(item) for item in report['results'])
           assert all(item['speedup'] > 0 for item in report['results'])
           PY
 

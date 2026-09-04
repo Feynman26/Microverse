@@ -72,6 +72,10 @@ asserts exact checksum equality after every tick, and verifies final event-log
 equality. This controls CPU boost and thermal-order bias. The report contains
 elapsed time, ticks/s and legacy/dense speedup for each population.
 
+The runner exits nonzero without writing a result when the compiled network is
+unavailable, parameters are invalid, scientific states diverge or the output
+cannot be written. Empty comparison objects are never accepted as evidence.
+
 ## Acceptance gate
 
 P3-A is eligible to merge only when:
