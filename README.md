@@ -127,6 +127,12 @@ P1 uses the P0 evidence to separate interactive scheduling from presentation
 without changing M10 biology. See `docs/P1_RESPONSIVE_RUNTIME.md` for worker
 ownership, immutable snapshot, clock/backpressure and exact-equivalence rules.
 
+P2 routes interactive execution and the experiment runner through a versioned
+simulation-backend contract. Commands produce compact deltas, visual snapshots
+declare their schema, and profiling reports deterministic work counters beside
+phase timings. See `docs/P2_RUNTIME_CONTRACTS.md`. P2 preserves M10 exactly and
+does not claim a throughput improvement; dense-state optimization begins in P3.
+
 The current gates include diffusion/nonnegativity; fair resource allocation; exact genome and molecular inheritance; reaction-order independence; digital C/N/P conservation; ATP+ADP and NAD+NADH conservation; sparse-but-connected catalytic-landscape statistics; aerobic versus hypoxic metabolism; one-mutation activation of a dormant metabolic route; catalytic BIO assembly; exact stochastic expression replay; clone phenotypic divergence across seeds; expression structural/energy accounting; gene-order independence; mutation-to-protein lag; stochastic sister partition; Poisson statistics; resource-scarcity scaling; resource-supported division; extinction without replenishable energy; and complete same-seed state/history reproducibility.
 
 ## Documentation
@@ -136,6 +142,8 @@ The current gates include diffusion/nonnegativity; fair resource allocation; exa
   deterministic parallelism and P0–P10 migration gates.
 - `docs/P1_RESPONSIVE_RUNTIME.md` — interactive worker ownership, immutable
   visual snapshots, honest clock/backpressure and equivalence gate.
+- `docs/P2_RUNTIME_CONTRACTS.md` — backend interface, commands/deltas, legacy
+  adapter, schema versions and structural work counters.
 - `docs/SCIENTIFIC_MODEL.md` — biological abstractions, equations, assumptions, limitations and validation hierarchy.
 - `docs/M3_GENETICS.md` — gene/genome representation, inheritance and mutation semantics.
 - `docs/M4_CATALYTIC_LANDSCAPE.md` — catalytic-affinity landscape design and statistical gate.

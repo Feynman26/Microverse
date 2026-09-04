@@ -1,9 +1,9 @@
 extends RefCounted
 class_name InteractiveSimulationRuntime
 
-const SimulationEngineScript = preload("res://src/simulation/simulation_engine.gd")
 const InteractiveClockScript = preload("res://src/runtime/interactive_clock.gd")
-const VisualSnapshotScript = preload("res://src/observation/visual_snapshot.gd")
+const LegacySimulationBackendScript = preload("res://src/runtime/legacy_simulation_backend.gd")
+const SimulationCommandScript = preload("res://src/runtime/simulation_command.gd")
 
 const SPEED_MEASURE_USEC: int = 500000
 const OVERLOAD_VISIBLE_USEC: int = 2000000
@@ -108,8 +108,10 @@ func latest_snapshot() -> Dictionary:
 	return result
 
 func _thread_main() -> void:
-	var simulation = SimulationEngineScript.new(_config)
-	simulation.seed_ancestor()
+	# The worker owns the backend exactly as P1 owned SimulationEngine. P2 moves
+	# the dependency behind ISimulationBackend without changing thread ownership.
+	var backend = LegacySimulationBackendScript.new(_config)
+	backend.execute(SimulationCommandScript.seed_ancestor())
 	var clock = InteractiveClockScript.new(float(_config.tick_dt_min))
 	var control: Dictionary = _control_state()
 	clock.set_requested_multiplier(float(control["requested_multiplier"]))
@@ -124,7 +126,7 @@ func _thread_main() -> void:
 	var seen_overload_events: int = 0
 	var seen_command_revision: int = int(control["revision"])
 	var was_paused: bool = bool(control["paused"])
-	_publish_snapshot(simulation, clock, actual_ticks_per_second, now_usec, last_overload_usec, true)
+	_publish_snapshot(backend, clock, actual_ticks_per_second, now_usec, last_overload_usec, true)
 
 	while true:
 		now_usec = Time.get_ticks_usec()
@@ -156,12 +158,12 @@ func _thread_main() -> void:
 		var stepped: bool = false
 		var reached_compute_limit: bool = false
 		if exact_tick or automatic_tick:
-			simulation.step(1)
+			var delta: Dictionary = backend.execute(SimulationCommandScript.advance_ticks(1))
 			if automatic_tick:
 				clock.consume_tick()
 			speed_window_ticks += 1
 			stepped = true
-			if simulation.population_size() >= int(simulation.config.max_cells):
+			if int(delta["population_after"]) >= int(_config.max_cells):
 				_mark_compute_limit_reached()
 				clock.clear_backlog()
 				last_overload_usec = Time.get_ticks_usec()
@@ -182,7 +184,7 @@ func _thread_main() -> void:
 		var snapshot_due: bool = completed_usec - last_snapshot_usec >= _snapshot_interval_usec(clock.requested_multiplier)
 		if snapshot_due or command_changed or exact_tick or reached_compute_limit:
 			_publish_snapshot(
-				simulation,
+				backend,
 				clock,
 				actual_ticks_per_second,
 				completed_usec,
@@ -195,7 +197,7 @@ func _thread_main() -> void:
 			OS.delay_usec(IDLE_DELAY_USEC)
 
 	_publish_snapshot(
-		simulation,
+		backend,
 		clock,
 		0.0,
 		Time.get_ticks_usec(),
@@ -232,14 +234,14 @@ func _mark_compute_limit_reached() -> void:
 	_control_mutex.unlock()
 
 func _publish_snapshot(
-	simulation,
+	backend,
 	clock,
 	actual_ticks_per_second: float,
 	now_usec: int,
 	last_overload_usec: int,
 	worker_active: bool
 ) -> void:
-	var snapshot: Dictionary = VisualSnapshotScript.capture(simulation)
+	var snapshot: Dictionary = backend.capture_visual_snapshot()
 	var control: Dictionary = _control_state()
 	_snapshot_sequence += 1
 	snapshot["runtime"] = {

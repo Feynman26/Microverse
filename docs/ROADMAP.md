@@ -9,12 +9,20 @@ scaling scenarios and established the target-workstation headless and
 interactive evidence without changing scientific execution semantics.
 `docs/P0_PERFORMANCE_BASELINE.md` defines that retained comparison baseline.
 
-P1 implements the selected responsiveness work: the simulation runs on a
+P1 is complete. The simulation runs on a
 dedicated worker, presentation consumes immutable visual snapshots, wall-clock
 demand uses bounded and visible backpressure, and requested versus achieved
 speed is reported honestly. `docs/P1_RESPONSIVE_RUNTIME.md` defines its
-boundary and exit criteria. No new biology resumes until Architecture v2 closes
-through P10.
+boundary and exit criteria. Its target-machine acceptance used Godot 4.7.2 on
+an AMD Ryzen 5 4500U: 100× overload remained rendered and controllable while
+backlog and unserved demand were reported explicitly.
+
+P2 introduces versioned backend, command, delta, visual-snapshot and telemetry
+contracts around the unchanged M10 engine. Interactive execution and the M8
+experiment runner mutate state through `LegacySimulationBackend`, allowing P3
+to replace data stores incrementally. `docs/P2_RUNTIME_CONTRACTS.md` defines
+the migration boundary and exact-equivalence gate. No new biology resumes until
+Architecture v2 closes through P10.
 
 ## M0 — Numerical world foundation
 

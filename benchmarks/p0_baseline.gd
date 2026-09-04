@@ -73,6 +73,7 @@ func _run_scenario(initial_population: int) -> Dictionary:
 		"ticks_per_second": float(_measured_ticks) * 1000000.0 / float(elapsed_usec),
 		"mean_usec_per_tick": float(elapsed_usec) / float(_measured_ticks),
 		"phase_profile": sim.performance_profiler.report(),
+		"structural_telemetry": sim.performance_profiler.structured_report(),
 		"memory_before": memory_before,
 		"memory_after": memory_after,
 		"final_checksum": sim.checksum(),
