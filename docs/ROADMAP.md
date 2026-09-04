@@ -2,6 +2,14 @@
 
 This roadmap is gate-driven. A milestone is complete only when its exit criteria pass; later biological complexity must not be added on top of unresolved numerical or causal defects.
 
+## Architecture v2 prerequisite — P0 performance baseline
+
+Before M11 adds new biology, P0 instruments the closed M10 engine and freezes
+standard scaling scenarios. P0 is observational only: it may measure phase
+costs, throughput, memory/object counters and frame behavior, but it may not
+change scientific execution semantics. `docs/P0_PERFORMANCE_BASELINE.md`
+defines the runner and evidence required to select P1 work.
+
 ## M0 — Numerical world foundation
 
 ### Deliverables

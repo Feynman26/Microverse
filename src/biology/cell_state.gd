@@ -127,7 +127,7 @@ func apply_uptake(uptake: Dictionary) -> void:
 		var amount: float = maxf(0.0, float(uptake.get(world_field, 0.0)))
 		MetabolicSolverScript.add_pool(metabolites, String(mapping[world_field]), amount)
 
-func step_intracellular(dt: float, config, reactions: Array, rng) -> void:
+func step_intracellular(dt: float, config, reactions: Array, rng, profiler = null) -> void:
 	if not alive:
 		return
 	assert(genome != null, "M5 physiology requires a genome")
@@ -137,20 +137,41 @@ func step_intracellular(dt: float, config, reactions: Array, rng) -> void:
 	# Expression happens before metabolism for this tick. It consumes current
 	# ATP/material and changes the proteome; metabolism then reads that realized
 	# proteome. No promoter value enters catalytic flux directly.
+	var phase_started: int = profiler.begin_phase() if profiler != null else 0
 	last_expression_summary = ExpressionSystemScript.step(expression_state, genome, metabolites, dt, rng, config, volume)
+	if profiler != null:
+		profiler.end_phase(&"cell_expression", phase_started)
+	phase_started = profiler.begin_phase() if profiler != null else 0
 	var proteome_summary: Dictionary = _enforce_proteome_budget(config, true)
 	for key in proteome_summary.keys():
 		last_expression_summary[key] = proteome_summary[key]
+	if profiler != null:
+		profiler.end_phase(&"cell_proteome_constraint", phase_started)
+	phase_started = profiler.begin_phase() if profiler != null else 0
 	last_fluxes = MetabolicSolverScript.step(metabolites, genome, expression_state, reactions, dt, volume, config)
+	if profiler != null:
+		profiler.end_phase(&"cell_metabolism", phase_started)
+	phase_started = profiler.begin_phase() if profiler != null else 0
 	_sync_volume_from_biomass(config)
 	# DNA copying occurs after this tick's metabolism, so the replication fork
 	# pays from explicit ATP/NUC actually available in the cell. This cost then
 	# competes with maintenance and repair rather than being an abstract delay.
 	last_replication_summary = DNAReplicationScript.step(self, dt, config)
+	if profiler != null:
+		profiler.end_phase(&"cell_replication", phase_started)
+	phase_started = profiler.begin_phase() if profiler != null else 0
 	_pay_maintenance(dt, config)
+	if profiler != null:
+		profiler.end_phase(&"cell_maintenance", phase_started)
+	phase_started = profiler.begin_phase() if profiler != null else 0
 	_update_damage_and_repair(dt, config)
+	if profiler != null:
+		profiler.end_phase(&"cell_damage_repair", phase_started)
+	phase_started = profiler.begin_phase() if profiler != null else 0
 	_check_viability(config)
 	_assert_state(config)
+	if profiler != null:
+		profiler.end_phase(&"cell_validation", phase_started)
 
 # Generic finite proteome constraint. All realized protein cohorts compete for
 # the same physical budget; no locus, sequence or biological function is given

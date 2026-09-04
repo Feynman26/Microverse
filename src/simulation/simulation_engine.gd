@@ -16,6 +16,7 @@ const ExtracellularReactionCatalogScript = preload("res://src/chemistry/extracel
 const ExtracellularCatalysisScript = preload("res://src/chemistry/extracellular_catalysis.gd")
 const MembraneTransportScript = preload("res://src/transport/membrane_transport.gd")
 const CellMechanicsScript = preload("res://src/physics/cell_mechanics.gd")
+const PerformanceProfilerScript = preload("res://src/observation/performance_profiler.gd")
 
 # Historical basal uptake is preserved separately while M7 adds sequence-derived
 # exchange for the secondary extracellular chemistry.
@@ -37,12 +38,14 @@ var last_mechanics_summary: Dictionary = {}
 var last_secondary_transport_summary: Dictionary = {}
 var last_protein_secretion_summary: Dictionary = {}
 var last_extracellular_catalysis_summary: Dictionary = {}
+var performance_profiler
 
 func _init(p_config = null) -> void:
 	config = p_config if p_config != null else SimConfigScript.new()
 	config.validate()
 	rng = DeterministicRngScript.new(config.seed)
 	mutation_engine = MutationEngineScript.new()
+	performance_profiler = PerformanceProfilerScript.new(bool(config.performance_profiling_enabled))
 	reactions = ReactionCatalogScript.create_m4_candidate()
 	ReactionCatalogScript.validate_unique(reactions)
 	extracellular_reactions = ExtracellularReactionCatalogScript.create_m7_candidate()
@@ -93,27 +96,55 @@ func step(tick_count: int = 1) -> void:
 		_step_once()
 
 func _step_once() -> void:
+	var tick_started: int = performance_profiler.begin_phase()
 	var dt: float = float(config.tick_dt_min)
+	var phase_started: int = performance_profiler.begin_phase()
 	world.diffuse(dt)
+	performance_profiler.end_phase(&"diffusion", phase_started)
+	phase_started = performance_profiler.begin_phase()
 	_allocate_membrane_transport(dt)
+	performance_profiler.end_phase(&"basal_transport", phase_started)
+	phase_started = performance_profiler.begin_phase()
 	last_secondary_transport_summary = _allocate_secondary_membrane_transport(dt)
+	performance_profiler.end_phase(&"secondary_transport", phase_started)
+	phase_started = performance_profiler.begin_phase()
 	last_protein_secretion_summary = _secrete_extracellular_proteins(dt)
+	performance_profiler.end_phase(&"protein_secretion", phase_started)
+	phase_started = performance_profiler.begin_phase()
 	last_extracellular_catalysis_summary = ExtracellularCatalysisScript.step(world, extracellular_reactions, dt, config)
+	performance_profiler.end_phase(&"extracellular_catalysis", phase_started)
 
 	# Extracellular products are created after membrane allocation, so another
 	# cell cannot consume a just-created public molecule at zero elapsed time.
 	# It becomes available to transport on the next simulation tick after the
 	# ordinary diffusion phase has had a chance to establish spatial structure.
+	phase_started = performance_profiler.begin_phase()
 	for cell in cells:
 		if cell.alive:
-			cell.step_intracellular(dt, config, reactions, rng)
+			cell.step_intracellular(
+				dt,
+				config,
+				reactions,
+				rng,
+				performance_profiler if performance_profiler.enabled else null
+			)
+	performance_profiler.end_phase(&"intracellular", phase_started)
 
+	phase_started = performance_profiler.begin_phase()
 	_process_deaths()
+	performance_profiler.end_phase(&"deaths", phase_started)
+	phase_started = performance_profiler.begin_phase()
 	_process_divisions()
+	performance_profiler.end_phase(&"divisions", phase_started)
+	phase_started = performance_profiler.begin_phase()
 	last_mechanics_summary = CellMechanicsScript.relax(cells, world, config, bool(config.mechanical_use_spatial_index))
+	performance_profiler.end_phase(&"mechanics", phase_started)
+	phase_started = performance_profiler.begin_phase()
 	world.assert_nonnegative()
+	performance_profiler.end_phase(&"invariants", phase_started)
 	tick_index += 1
 	simulation_time_min += dt
+	performance_profiler.end_phase(&"tick_total", tick_started)
 
 func _allocate_membrane_transport(dt: float) -> void:
 	var records: Array = []

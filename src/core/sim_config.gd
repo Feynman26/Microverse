@@ -11,6 +11,10 @@ var grid_cell_size_um: float = 1.0
 var max_cells: int = 256
 var seed: int = 824718
 
+# P0 wall-clock observation only. This flag must never alter biological state,
+# stochastic streams, phase ordering, checksums or snapshots.
+var performance_profiling_enabled: bool = false
+
 var initial_glucose: float = 4.0
 var initial_oxygen: float = 5.0
 var initial_nitrogen: float = 3.0
