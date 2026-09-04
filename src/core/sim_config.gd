@@ -88,6 +88,9 @@ var extracellular_catalysis_km: float = 0.25
 var metabolic_substeps_per_tick: int = 6
 var metabolic_km_per_volume: float = 0.20
 var metabolic_rate_scale: float = 0.85
+# Execution-only exact-mode switch retained for P3 shadow comparisons. Both
+# paths must produce identical scientific state; new runs use the dense solver.
+var metabolic_use_dense_solver: bool = true
 var biomass_units_per_volume: float = 1.0
 var initial_atp_per_volume: float = 2.0
 var initial_adp_per_volume: float = 8.0

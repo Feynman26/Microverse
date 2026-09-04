@@ -27,6 +27,7 @@ var rng
 var world
 var mutation_engine
 var reactions: Array = []
+var compiled_reactions = null
 var extracellular_reactions: Array = []
 var cells: Array = []
 var tick_index: int = 0
@@ -48,6 +49,7 @@ func _init(p_config = null) -> void:
 	performance_profiler = PerformanceProfilerScript.new(bool(config.performance_profiling_enabled))
 	reactions = ReactionCatalogScript.create_m4_candidate()
 	ReactionCatalogScript.validate_unique(reactions)
+	compiled_reactions = MetabolicSolverScript.compile_network(reactions)
 	extracellular_reactions = ExtracellularReactionCatalogScript.create_m7_candidate()
 	ExtracellularReactionCatalogScript.validate_unique(extracellular_reactions)
 	world = WorldStateScript.new(config.world_width, config.world_height, config.grid_cell_size_um)
@@ -127,7 +129,8 @@ func _step_once() -> void:
 				config,
 				reactions,
 				rng,
-				performance_profiler if performance_profiler.enabled else null
+				performance_profiler if performance_profiler.enabled else null,
+				compiled_reactions
 			)
 	performance_profiler.end_phase(&"intracellular", phase_started)
 
@@ -166,6 +169,12 @@ func _record_structural_work() -> void:
 		extracellular_reactions.size() * lattice_size
 	)
 	performance_profiler.add_work(&"intracellular_cell_steps", cell_count)
+	var solver_counter: StringName = (
+		&"dense_metabolic_cell_steps"
+		if bool(config.metabolic_use_dense_solver)
+		else &"legacy_metabolic_cell_steps"
+	)
+	performance_profiler.add_work(solver_counter, cell_count)
 	performance_profiler.add_work(&"lifecycle_cell_visits", cell_count * 2)
 	performance_profiler.add_work(&"mechanics_body_visits", cell_count)
 	performance_profiler.add_work(&"invariant_field_lattice_slots", field_count * lattice_size)
