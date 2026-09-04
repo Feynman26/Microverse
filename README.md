@@ -83,6 +83,12 @@ CI installs the same stable engine version.
 
 Open `project.godot` in Godot and run the project.
 
+The interactive M10 simulation runs on a dedicated worker. Rendering and input
+consume immutable visual snapshots, so requesting a clock faster than the
+computer can achieve does not require the scene-tree thread to execute or wait
+for a biological tick. The status panel reports requested/achieved speed,
+bounded backlog and unserved clock demand. The project starts at 1×.
+
 Controls:
 
 - `Space`: pause/resume;
@@ -117,6 +123,10 @@ See `docs/P0_PERFORMANCE_BASELINE.md` for the measurement contract, target
 workstation procedure and interpretation limits. Profiling is disabled in
 ordinary simulations and does not enter biological state or checksums.
 
+P1 uses the P0 evidence to separate interactive scheduling from presentation
+without changing M10 biology. See `docs/P1_RESPONSIVE_RUNTIME.md` for worker
+ownership, immutable snapshot, clock/backpressure and exact-equivalence rules.
+
 The current gates include diffusion/nonnegativity; fair resource allocation; exact genome and molecular inheritance; reaction-order independence; digital C/N/P conservation; ATP+ADP and NAD+NADH conservation; sparse-but-connected catalytic-landscape statistics; aerobic versus hypoxic metabolism; one-mutation activation of a dormant metabolic route; catalytic BIO assembly; exact stochastic expression replay; clone phenotypic divergence across seeds; expression structural/energy accounting; gene-order independence; mutation-to-protein lag; stochastic sister partition; Poisson statistics; resource-scarcity scaling; resource-supported division; extinction without replenishable energy; and complete same-seed state/history reproducibility.
 
 ## Documentation
@@ -124,6 +134,8 @@ The current gates include diffusion/nonnegativity; fair resource allocation; exa
 - `docs/ARCHITECTURE.md` — system boundaries, tick semantics, target genome/protein/chemistry architecture, persistence, analytics and performance rules.
 - `docs/ARCHITECTURE_V2.md` — scalable multiscale target, Biological LOD,
   deterministic parallelism and P0–P10 migration gates.
+- `docs/P1_RESPONSIVE_RUNTIME.md` — interactive worker ownership, immutable
+  visual snapshots, honest clock/backpressure and equivalence gate.
 - `docs/SCIENTIFIC_MODEL.md` — biological abstractions, equations, assumptions, limitations and validation hierarchy.
 - `docs/M3_GENETICS.md` — gene/genome representation, inheritance and mutation semantics.
 - `docs/M4_CATALYTIC_LANDSCAPE.md` — catalytic-affinity landscape design and statistical gate.
