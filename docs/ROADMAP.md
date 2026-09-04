@@ -2,13 +2,19 @@
 
 This roadmap is gate-driven. A milestone is complete only when its exit criteria pass; later biological complexity must not be added on top of unresolved numerical or causal defects.
 
-## Architecture v2 prerequisite — P0 performance baseline
+## Architecture v2 migration status
 
-Before M11 adds new biology, P0 instruments the closed M10 engine and freezes
-standard scaling scenarios. P0 is observational only: it may measure phase
-costs, throughput, memory/object counters and frame behavior, but it may not
-change scientific execution semantics. `docs/P0_PERFORMANCE_BASELINE.md`
-defines the runner and evidence required to select P1 work.
+P0 is complete. It instrumented the closed M10 engine, froze the standard
+scaling scenarios and established the target-workstation headless and
+interactive evidence without changing scientific execution semantics.
+`docs/P0_PERFORMANCE_BASELINE.md` defines that retained comparison baseline.
+
+P1 implements the selected responsiveness work: the simulation runs on a
+dedicated worker, presentation consumes immutable visual snapshots, wall-clock
+demand uses bounded and visible backpressure, and requested versus achieved
+speed is reported honestly. `docs/P1_RESPONSIVE_RUNTIME.md` defines its
+boundary and exit criteria. No new biology resumes until Architecture v2 closes
+through P10.
 
 ## M0 — Numerical world foundation
 
