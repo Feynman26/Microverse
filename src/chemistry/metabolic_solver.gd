@@ -3,6 +3,8 @@ class_name MetabolicSolver
 
 const CatalyticLandscapeScript = preload("res://src/chemistry/catalytic_landscape.gd")
 const MetaboliteCatalogScript = preload("res://src/chemistry/metabolite_catalog.gd")
+const CompiledReactionNetworkScript = preload("res://src/chemistry/compiled_reaction_network.gd")
+const DenseMetabolicSolverScript = preload("res://src/chemistry/dense_metabolic_solver.gd")
 
 # Authoritative chemical state lives in each cell. Reaction flux is solved from
 # one pool snapshot per substep and one realized proteome snapshot per tick.
@@ -21,7 +23,54 @@ static func create_initial_pools(volume: float, config) -> Dictionary:
 	pools["NADH"] = float(config.initial_nadh_per_volume) * volume
 	return pools
 
-static func step(pools: Dictionary, genome, expression_state: Dictionary, reactions: Array, dt: float, volume: float, config) -> Dictionary:
+static func compile_network(reactions: Array):
+	return CompiledReactionNetworkScript.compile(reactions)
+
+static func step(
+	pools: Dictionary,
+	genome,
+	expression_state: Dictionary,
+	reactions: Array,
+	dt: float,
+	volume: float,
+	config,
+	compiled_network = null,
+	workspace = null,
+	use_dense: bool = true
+) -> Dictionary:
+	assert(genome != null)
+	assert(not expression_state.is_empty())
+	assert(dt >= 0.0)
+	assert(volume > 0.0)
+	if not use_dense:
+		return step_legacy_reference(pools, genome, expression_state, reactions, dt, volume, config)
+	var network = compiled_network
+	if network == null:
+		network = compile_network(reactions)
+	var dense_workspace: Dictionary = workspace if workspace != null else {}
+	return DenseMetabolicSolverScript.step(
+		pools,
+		genome,
+		expression_state,
+		reactions,
+		network,
+		dt,
+		volume,
+		config,
+		dense_workspace
+	)
+
+# Frozen M10 implementation retained as the exact P3 shadow oracle. It remains
+# callable by equivalence and performance tests but is not the production path.
+static func step_legacy_reference(
+	pools: Dictionary,
+	genome,
+	expression_state: Dictionary,
+	reactions: Array,
+	dt: float,
+	volume: float,
+	config
+) -> Dictionary:
 	assert(genome != null)
 	assert(not expression_state.is_empty())
 	assert(dt >= 0.0)

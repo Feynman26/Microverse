@@ -27,6 +27,23 @@ const DEFINITIONS: Dictionary = {
 	"X": {"name": "semantically_neutral_diffusible_compound", "C": 0, "N": 0, "P": 0, "ligand": 0x9696, "field": "neutral_x"}
 }
 
+# P3 canonical dense order. These arrays are immutable by contract and preserve
+# the alphabetical order returned by the historical dynamically sorted API.
+const ORDERED_IDS: Array[String] = [
+	"AA", "ADP", "ATP", "BIO", "C2", "C3", "CO2", "G", "LIP", "NAD",
+	"NADH", "NH4", "NUC", "O2", "P", "ROS", "W1", "W2", "X"
+]
+const INDEX_BY_ID: Dictionary = {
+	"AA": 0, "ADP": 1, "ATP": 2, "BIO": 3, "C2": 4, "C3": 5,
+	"CO2": 6, "G": 7, "LIP": 8, "NAD": 9, "NADH": 10, "NH4": 11,
+	"NUC": 12, "O2": 13, "P": 14, "ROS": 15, "W1": 16, "W2": 17,
+	"X": 18
+}
+const ORDERED_EXTRACELLULAR_IDS: Array[String] = [
+	"AA", "C2", "C3", "CO2", "G", "LIP", "NH4", "NUC", "O2", "P", "ROS",
+	"W1", "W2", "X"
+]
+
 static func has(metabolite_id: String) -> bool:
 	return DEFINITIONS.has(metabolite_id)
 
@@ -55,16 +72,15 @@ static func extracellular_metabolite_for_field(field_name: String) -> String:
 	return ""
 
 static func extracellular_ids() -> Array[String]:
-	var result: Array[String] = []
-	for key in DEFINITIONS.keys():
-		var metabolite_id := String(key)
-		if has_extracellular_field(metabolite_id):
-			result.append(metabolite_id)
-	result.sort()
-	return result
+	return ORDERED_EXTRACELLULAR_IDS
 
 static func ids() -> Array[String]:
-	var result: Array[String] = []
-	for key in DEFINITIONS.keys(): result.append(String(key))
-	result.sort()
-	return result
+	return ORDERED_IDS
+
+static func index_of(metabolite_id: String) -> int:
+	assert(INDEX_BY_ID.has(metabolite_id), "Unknown metabolite: %s" % metabolite_id)
+	return int(INDEX_BY_ID[metabolite_id])
+
+static func id_at(index: int) -> String:
+	assert(index >= 0 and index < ORDERED_IDS.size())
+	return ORDERED_IDS[index]

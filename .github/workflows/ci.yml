@@ -57,6 +57,21 @@ jobs:
       - name: Validate P2 backend commands deltas and legacy equivalence
         run: godot --headless --path . --script tests/p2_runtime_contract_tests.gd
 
+      - name: Validate P3 dense metabolism against frozen M10 solver
+        run: godot --headless --path . --script tests/p3_dense_metabolism_tests.gd
+
+      - name: Characterize paired P3 performance
+        run: |
+          godot --headless --path . --script benchmarks/p3_dense_metabolism.gd -- --warmup=2 --ticks=5 --populations=1,16,64 --output=/tmp/p3-smoke.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('/tmp/p3-smoke.json').read_text())
+          assert report['schema_version'] == 1
+          assert [item['initial_population'] for item in report['results']] == [1, 16, 64]
+          assert all(item['speedup'] > 0 for item in report['results'])
+          PY
+
       - name: Smoke-test P0 baseline runner
         run: |
           godot --headless --path . --script benchmarks/p0_baseline.gd -- --warmup=0 --ticks=1 --populations=1,16,64 --output=/tmp/p0-smoke.json

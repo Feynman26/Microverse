@@ -22,6 +22,9 @@ var expression_state: Dictionary = {}
 var last_fluxes: Dictionary = {}
 var last_expression_summary: Dictionary = {}
 var last_replication_summary: Dictionary = {}
+# P3 derived scratch space. Dense solver buffers are reusable but never enter
+# snapshots, checksums, inheritance or biological decisions.
+var metabolic_workspace: Dictionary = {}
 var volume: float = 1.0
 var damage: float = 0.0
 var energy_debt: float = 0.0
@@ -127,7 +130,14 @@ func apply_uptake(uptake: Dictionary) -> void:
 		var amount: float = maxf(0.0, float(uptake.get(world_field, 0.0)))
 		MetabolicSolverScript.add_pool(metabolites, String(mapping[world_field]), amount)
 
-func step_intracellular(dt: float, config, reactions: Array, rng, profiler = null) -> void:
+func step_intracellular(
+	dt: float,
+	config,
+	reactions: Array,
+	rng,
+	profiler = null,
+	compiled_reactions = null
+) -> void:
 	if not alive:
 		return
 	assert(genome != null, "M5 physiology requires a genome")
@@ -148,7 +158,18 @@ func step_intracellular(dt: float, config, reactions: Array, rng, profiler = nul
 	if profiler != null:
 		profiler.end_phase(&"cell_proteome_constraint", phase_started)
 	phase_started = profiler.begin_phase() if profiler != null else 0
-	last_fluxes = MetabolicSolverScript.step(metabolites, genome, expression_state, reactions, dt, volume, config)
+	last_fluxes = MetabolicSolverScript.step(
+		metabolites,
+		genome,
+		expression_state,
+		reactions,
+		dt,
+		volume,
+		config,
+		compiled_reactions,
+		metabolic_workspace,
+		bool(config.metabolic_use_dense_solver)
+	)
 	if profiler != null:
 		profiler.end_phase(&"cell_metabolism", phase_started)
 	phase_started = profiler.begin_phase() if profiler != null else 0

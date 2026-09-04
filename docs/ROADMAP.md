@@ -24,6 +24,12 @@ to replace data stores incrementally. `docs/P2_RUNTIME_CONTRACTS.md` defines
 the migration boundary and exact-equivalence gate. No new biology resumes until
 Architecture v2 closes through P10.
 
+P3-A begins measured throughput work in the dominant intracellular path. It
+uses canonical metabolite indices, compiled stoichiometry and per-cell reusable
+Float64 workspaces while retaining the dictionary M10 solver as an exact
+oracle. `docs/P3_DENSE_METABOLISM.md` defines the paired benchmark and prevents
+merge until target-laptop speed and exact-equivalence gates both pass.
+
 ## M0 — Numerical world foundation
 
 ### Deliverables
