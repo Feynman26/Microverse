@@ -40,6 +40,10 @@ var last_secondary_transport_summary: Dictionary = {}
 var last_protein_secretion_summary: Dictionary = {}
 var last_extracellular_catalysis_summary: Dictionary = {}
 var performance_profiler
+# P3-B derived recognition cache. It contains no biological state and is safe
+# to rebuild after construction or snapshot restore.
+var secondary_transport_target_signatures: PackedInt32Array = PackedInt32Array()
+var secondary_transport_affinity_rows: Dictionary = {}
 
 func _init(p_config = null) -> void:
 	config = p_config if p_config != null else SimConfigScript.new()
@@ -47,6 +51,9 @@ func _init(p_config = null) -> void:
 	rng = DeterministicRngScript.new(config.seed)
 	mutation_engine = MutationEngineScript.new()
 	performance_profiler = PerformanceProfilerScript.new(bool(config.performance_profiling_enabled))
+	secondary_transport_target_signatures = MembraneTransportScript.transport_target_signatures(
+		config.SECONDARY_EXTRACELLULAR_IDS
+	)
 	reactions = ReactionCatalogScript.create_m4_candidate()
 	ReactionCatalogScript.validate_unique(reactions)
 	compiled_reactions = MetabolicSolverScript.compile_network(reactions)
@@ -163,6 +170,15 @@ func _record_structural_work() -> void:
 		&"secondary_transport_cell_metabolite_pairs",
 		cell_count * config.SECONDARY_EXTRACELLULAR_IDS.size()
 	)
+	var transport_proteome_passes: int = (
+		cell_count
+		if bool(config.secondary_transport_use_dense_allocator)
+		else cell_count * config.SECONDARY_EXTRACELLULAR_IDS.size()
+	)
+	performance_profiler.add_work(
+		&"secondary_transport_proteome_passes",
+		transport_proteome_passes
+	)
 	performance_profiler.add_work(&"protein_secretion_cell_visits", cell_count)
 	performance_profiler.add_work(
 		&"extracellular_reaction_lattice_slots",
@@ -226,6 +242,172 @@ func _allocate_membrane_transport(dt: float) -> void:
 # a producer cannot feed a consumer instantaneously within the same transport
 # phase.
 func _allocate_secondary_membrane_transport(dt: float) -> Dictionary:
+	if bool(config.secondary_transport_use_dense_allocator):
+		return _allocate_secondary_membrane_transport_dense(dt)
+	return _allocate_secondary_membrane_transport_legacy_reference(dt)
+
+# P3-B dense allocator. Scientific ledgers remain Dictionaries at the public
+# boundary, but the hot proposal/allocation path uses canonical numeric arrays
+# and traverses each cell proteome only once for all secondary metabolites.
+func _allocate_secondary_membrane_transport_dense(dt: float) -> Dictionary:
+	var metabolite_ids: Array[String] = config.SECONDARY_EXTRACELLULAR_IDS
+	var metabolite_count: int = metabolite_ids.size()
+	var fields: Array = []
+	var import_totals: Array[Dictionary] = []
+	var import_scales: Array[Dictionary] = []
+	var world_imports: Array[Dictionary] = []
+	var world_exports: Array[Dictionary] = []
+	for metabolite_index in range(metabolite_count):
+		var field_name: String = MetaboliteCatalogScript.extracellular_field(metabolite_ids[metabolite_index])
+		fields.append(world.get_field(field_name))
+		import_totals.append({})
+		import_scales.append({})
+		world_imports.append({})
+		world_exports.append({})
+
+	var record_cells: Array = []
+	var record_keys: Array[Vector2i] = []
+	var record_activities: Array = []
+	var record_energy_scales: PackedFloat64Array = PackedFloat64Array()
+	var record_proposals: Array = []
+	for cell in cells:
+		if not cell.alive:
+			continue
+		var key: Vector2i = _grid_key(cell.position)
+		var activities: PackedFloat64Array = MembraneTransportScript.proteome_activities_for_targets(
+			cell.expression_state,
+			secondary_transport_target_signatures,
+			config,
+			secondary_transport_affinity_rows
+		)
+		var proposed := PackedFloat64Array()
+		proposed.resize(metabolite_count)
+		for metabolite_index in range(metabolite_count):
+			var metabolite_id: String = metabolite_ids[metabolite_index]
+			var activity: float = activities[metabolite_index]
+			if activity <= 0.0:
+				proposed[metabolite_index] = 0.0
+				continue
+			var external_amount: float = maxf(
+				0.0,
+				float(fields[metabolite_index].get_value(key.x, key.y))
+			)
+			proposed[metabolite_index] = MembraneTransportScript.desired_exchange(
+				cell.pool(metabolite_id),
+				cell.volume,
+				external_amount,
+				activity,
+				dt,
+				config
+			)
+
+		var energy_scale: float = MembraneTransportScript.energy_scale_dense(
+			proposed,
+			cell.pool("ATP"),
+			config
+		)
+		for metabolite_index in range(metabolite_count):
+			var signed_amount: float = proposed[metabolite_index] * energy_scale
+			proposed[metabolite_index] = signed_amount
+			if signed_amount > 0.0:
+				var totals_by_key: Dictionary = import_totals[metabolite_index]
+				totals_by_key[key] = float(totals_by_key.get(key, 0.0)) + signed_amount
+		record_cells.append(cell)
+		record_keys.append(key)
+		record_activities.append(activities)
+		record_energy_scales.append(energy_scale)
+		record_proposals.append(proposed)
+
+	for metabolite_index in range(metabolite_count):
+		var totals_by_key: Dictionary = import_totals[metabolite_index]
+		var scales_by_key: Dictionary = import_scales[metabolite_index]
+		for key_variant in totals_by_key.keys():
+			var key: Vector2i = key_variant
+			var requested: float = float(totals_by_key[key])
+			var available: float = maxf(
+				0.0,
+				float(fields[metabolite_index].get_value(key.x, key.y))
+			)
+			scales_by_key[key] = 1.0 if requested <= available or requested <= 0.0 else available / requested
+
+	var record_actual: Array = []
+	for record_index in range(record_cells.size()):
+		var key: Vector2i = record_keys[record_index]
+		var proposed: PackedFloat64Array = record_proposals[record_index]
+		var actual := PackedFloat64Array()
+		actual.resize(metabolite_count)
+		for metabolite_index in range(metabolite_count):
+			var signed_amount: float = proposed[metabolite_index]
+			if signed_amount > 0.0:
+				var scale: float = float(import_scales[metabolite_index].get(key, 1.0))
+				var imported: float = signed_amount * scale
+				actual[metabolite_index] = imported
+				var imports_by_key: Dictionary = world_imports[metabolite_index]
+				imports_by_key[key] = float(imports_by_key.get(key, 0.0)) + imported
+			elif signed_amount < 0.0:
+				actual[metabolite_index] = signed_amount
+				var exports_by_key: Dictionary = world_exports[metabolite_index]
+				exports_by_key[key] = float(exports_by_key.get(key, 0.0)) + absf(signed_amount)
+			else:
+				actual[metabolite_index] = 0.0
+		record_actual.append(actual)
+
+	# Preserve the historical field/site update order and snapshot isolation:
+	# imports are removed before exports become available to another cell.
+	for metabolite_index in range(metabolite_count):
+		var field = fields[metabolite_index]
+		var imports_by_key: Dictionary = world_imports[metabolite_index]
+		for key_variant in imports_by_key.keys():
+			var key: Vector2i = key_variant
+			var requested_remove: float = float(imports_by_key[key])
+			var removed: float = float(field.remove_amount(key.x, key.y, requested_remove))
+			assert(absf(removed - requested_remove) <= 1e-9, "Secondary import allocation exceeded snapshot availability")
+		var exports_by_key: Dictionary = world_exports[metabolite_index]
+		for key_variant in exports_by_key.keys():
+			var key: Vector2i = key_variant
+			field.add_amount(key.x, key.y, float(exports_by_key[key]))
+
+	var by_cell: Dictionary = {}
+	var total_moved: float = 0.0
+	var total_atp_spent: float = 0.0
+	for record_index in range(record_cells.size()):
+		var cell = record_cells[record_index]
+		var activities: PackedFloat64Array = record_activities[record_index]
+		var actual: PackedFloat64Array = record_actual[record_index]
+		var activity_ledger: Dictionary = {}
+		var signed_actual: Dictionary = {}
+		var moved: float = 0.0
+		for metabolite_index in range(metabolite_count):
+			var metabolite_id: String = metabolite_ids[metabolite_index]
+			var signed_amount: float = actual[metabolite_index]
+			activity_ledger[metabolite_id] = activities[metabolite_index]
+			signed_actual[metabolite_id] = signed_amount
+			if signed_amount > 0.0:
+				MetabolicSolverScript.add_pool(cell.metabolites, metabolite_id, signed_amount)
+			elif signed_amount < 0.0:
+				cell.set_pool(metabolite_id, maxf(0.0, cell.pool(metabolite_id) + signed_amount))
+			moved += absf(signed_amount)
+		var cost: float = MembraneTransportScript.movement_cost(moved, config)
+		var spent: float = MetabolicSolverScript.spend_atp(cell.metabolites, cost)
+		assert(absf(spent - cost) <= 1e-9, "ATP pre-scaling failed to fund secondary transport")
+		total_moved += moved
+		total_atp_spent += spent
+		by_cell[int(cell.id)] = {
+			"exchange": signed_actual,
+			"activities": activity_ledger,
+			"energy_scale": record_energy_scales[record_index],
+			"moved": moved,
+			"atp_spent": spent
+		}
+
+	return {
+		"by_cell": by_cell,
+		"total_moved": total_moved,
+		"total_atp_spent": total_atp_spent
+	}
+
+# Frozen M7 reference retained only for P3-B exact shadow comparisons.
+func _allocate_secondary_membrane_transport_legacy_reference(dt: float) -> Dictionary:
 	var records: Array = []
 	var import_totals: Dictionary = {}
 	for metabolite_id in config.SECONDARY_EXTRACELLULAR_IDS:

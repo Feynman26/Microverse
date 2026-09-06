@@ -33,6 +33,10 @@ static func target_signature(metabolite_id: String) -> int:
 static func affinity(protein_signature: int, metabolite_id: String) -> float:
 	var protein: int = protein_signature & 0xFFFF
 	var target: int = target_signature(metabolite_id)
+	return affinity_to_target(protein, target)
+
+static func affinity_to_target(protein_signature: int, target: int) -> float:
+	var protein: int = protein_signature & 0xFFFF
 	var key: int = (protein << 16) | target
 	if _affinity_cache.has(key):
 		return float(_affinity_cache[key])
@@ -57,6 +61,64 @@ static func proteome_activity(expression_state: Dictionary, metabolite_id: Strin
 			var protein_signature: int = int(signature_variant)
 			var abundance: float = maxf(0.0, float(cohorts[signature_variant])) / float(config.expression_reference_protein_count)
 			result += abundance * affinity(protein_signature, metabolite_id)
+	return result
+
+# P3-B exact dense recognition. Every metabolite accumulator sees protein
+# cohorts in precisely the same sorted locus/signature order as the historical
+# scalar function above. The accumulations are merely interleaved, allowing one
+# proteome traversal and one pair of sorts per cell instead of one per target.
+static func proteome_activities(
+	expression_state: Dictionary,
+	metabolite_ids: Array[String],
+	config
+) -> PackedFloat64Array:
+	return proteome_activities_for_targets(
+		expression_state,
+		transport_target_signatures(metabolite_ids),
+		config,
+		{}
+	)
+
+static func transport_target_signatures(metabolite_ids: Array[String]) -> PackedInt32Array:
+	var targets := PackedInt32Array()
+	targets.resize(metabolite_ids.size())
+	for target_index in range(metabolite_ids.size()):
+		targets[target_index] = target_signature(metabolite_ids[target_index])
+	return targets
+
+# affinity_rows belongs to one compiled target vector in one simulation engine.
+# It is a derived cache keyed only by physical 16-bit protein signature.
+static func proteome_activities_for_targets(
+	expression_state: Dictionary,
+	targets: PackedInt32Array,
+	config,
+	affinity_rows: Dictionary
+) -> PackedFloat64Array:
+	var target_count: int = targets.size()
+	var result := PackedFloat64Array()
+	result.resize(target_count)
+
+	var loci: Array = expression_state.keys()
+	loci.sort()
+	for locus_variant in loci:
+		var locus_id: int = int(locus_variant)
+		var cohorts: Dictionary = expression_state[locus_id]["protein"]
+		var signatures: Array = cohorts.keys()
+		signatures.sort()
+		for signature_variant in signatures:
+			var protein_signature: int = int(signature_variant)
+			var abundance: float = maxf(0.0, float(cohorts[signature_variant])) / float(config.expression_reference_protein_count)
+			var affinity_row: PackedFloat64Array
+			if affinity_rows.has(protein_signature):
+				affinity_row = affinity_rows[protein_signature]
+			else:
+				affinity_row = PackedFloat64Array()
+				affinity_row.resize(target_count)
+				for target_index in range(target_count):
+					affinity_row[target_index] = affinity_to_target(protein_signature, targets[target_index])
+				affinity_rows[protein_signature] = affinity_row
+			for target_index in range(target_count):
+				result[target_index] += abundance * affinity_row[target_index]
 	return result
 
 # Signed desired exchange: positive means extracellular -> intracellular,
@@ -107,6 +169,17 @@ static func movement_cost(moved_units: float, config) -> float:
 # pool proportionally. No metabolite is privileged by iteration order.
 static func energy_scale(exchanges: Dictionary, available_atp: float, config) -> float:
 	var demand: float = movement_cost(total_movement(exchanges), config)
+	if demand <= 0.0:
+		return 1.0
+	return minf(1.0, maxf(0.0, available_atp) / demand)
+
+# Array equivalent used by the dense allocator. Iteration order is the
+# canonical metabolite order, matching Dictionary.values() in the legacy path.
+static func energy_scale_dense(exchanges: PackedFloat64Array, available_atp: float, config) -> float:
+	var moved: float = 0.0
+	for signed_amount in exchanges:
+		moved += absf(signed_amount)
+	var demand: float = movement_cost(moved, config)
 	if demand <= 0.0:
 		return 1.0
 	return minf(1.0, maxf(0.0, available_atp) / demand)
