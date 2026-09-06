@@ -138,6 +138,11 @@ stoichiometry and reusable Float64 workspaces while retaining the M10 solver as
 an exact shadow oracle. See `docs/P3_DENSE_METABOLISM.md` for the paired
 benchmark and target-laptop acceptance thresholds.
 
+P3-B targets the next measured hot path: secondary membrane transport. It
+traverses each proteome once for all transport targets and uses indexed numeric
+buffers internally while preserving the historical M7 ledger as an exact
+shadow oracle. See `docs/P3B_DENSE_SECONDARY_TRANSPORT.md`.
+
 The current gates include diffusion/nonnegativity; fair resource allocation; exact genome and molecular inheritance; reaction-order independence; digital C/N/P conservation; ATP+ADP and NAD+NADH conservation; sparse-but-connected catalytic-landscape statistics; aerobic versus hypoxic metabolism; one-mutation activation of a dormant metabolic route; catalytic BIO assembly; exact stochastic expression replay; clone phenotypic divergence across seeds; expression structural/energy accounting; gene-order independence; mutation-to-protein lag; stochastic sister partition; Poisson statistics; resource-scarcity scaling; resource-supported division; extinction without replenishable energy; and complete same-seed state/history reproducibility.
 
 ## Documentation
@@ -151,6 +156,8 @@ The current gates include diffusion/nonnegativity; fair resource allocation; exa
   adapter, schema versions and structural work counters.
 - `docs/P3_DENSE_METABOLISM.md` — indexed metabolite catalog, compiled reaction
   network, reusable dense solver and exact paired performance gate.
+- `docs/P3B_DENSE_SECONDARY_TRANSPORT.md` — single-pass proteome recognition,
+  indexed transport allocation and exact paired performance gate.
 - `docs/SCIENTIFIC_MODEL.md` — biological abstractions, equations, assumptions, limitations and validation hierarchy.
 - `docs/M3_GENETICS.md` — gene/genome representation, inheritance and mutation semantics.
 - `docs/M4_CATALYTIC_LANDSCAPE.md` — catalytic-affinity landscape design and statistical gate.

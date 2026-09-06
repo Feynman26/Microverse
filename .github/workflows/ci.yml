@@ -79,6 +79,29 @@ jobs:
           assert all(item['speedup'] > 0 for item in report['results'])
           PY
 
+      - name: Validate P3-B dense secondary transport against frozen M7 allocator
+        run: godot --headless --path . --script tests/p3b_dense_secondary_transport_tests.gd
+
+      - name: Characterize paired P3-B performance
+        run: |
+          godot --headless --path . --script benchmarks/p3b_dense_secondary_transport.gd -- --warmup=2 --ticks=5 --populations=1,16,64 --output=/tmp/p3b-smoke.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('/tmp/p3b-smoke.json').read_text())
+          assert report['schema_version'] == 1
+          assert report['purpose'] == 'p3b_dense_secondary_transport_paired_benchmark'
+          assert [item['initial_population'] for item in report['results']] == [1, 16, 64]
+          required = {
+              'initial_population', 'final_population', 'measured_ticks',
+              'dense_elapsed_usec', 'legacy_elapsed_usec',
+              'dense_ticks_per_second', 'legacy_ticks_per_second', 'speedup',
+              'exact_checksum', 'event_count'
+          }
+          assert all(required <= set(item) for item in report['results'])
+          assert all(item['speedup'] > 0 for item in report['results'])
+          PY
+
       - name: Smoke-test P0 baseline runner
         run: |
           godot --headless --path . --script benchmarks/p0_baseline.gd -- --warmup=0 --ticks=1 --populations=1,16,64 --output=/tmp/p0-smoke.json

@@ -73,6 +73,9 @@ var intracellular_pool_capacity_per_volume: float = 8.0
 var secondary_transport_vmax_per_reference_protein: float = 0.40
 var secondary_transport_gradient_km: float = 0.50
 var secondary_transport_atp_cost_per_unit: float = 0.02
+# Execution-only exact-mode switch retained for the P3-B shadow benchmark.
+# Both allocators must produce identical scientific state and ledgers.
+var secondary_transport_use_dense_allocator: bool = true
 
 # M7-E generic protein secretion and extracellular catalysis. A protein must
 # carry the sequence-level secretion motif before any of its realized molecules
